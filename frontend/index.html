@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Gateway Client</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部工具栏 -->
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <h1 class="logo">🤖 Agent Gateway</h1>
+      </div>
+      <div class="toolbar-center">
+        <div class="connection-status" id="connectionStatus">
+          <span class="status-dot disconnected"></span>
+          <span class="status-text">未连接</span>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <button id="settingsBtn" class="btn btn-icon" title="设置">⚙️</button>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 左侧边栏 - 文件浏览器 -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <span>📁 文件浏览器</span>
+          <button id="refreshFilesBtn" class="btn btn-small" title="刷新">🔄</button>
+        </div>
+        <div class="file-tree" id="fileTree">
+          <div class="empty-state">连接后显示文件</div>
+        </div>
+      </aside>
+
+      <!-- 中间内容区 -->
+      <section class="content-area">
+        <!-- 连接面板 -->
+        <div id="connectionPanel" class="panel connection-panel">
+          <h2>连接到 Gateway</h2>
+          <form id="connectionForm">
+            <div class="form-group">
+              <label for="gatewayUrl">Gateway 地址</label>
+              <input type="text" id="gatewayUrl"
+                     placeholder="ws://localhost:18789"
+                     value="ws://localhost:18789">
+            </div>
+            <div class="form-group">
+              <label for="workspace">工作区路径</label>
+              <input type="text" id="workspace"
+                     placeholder="/path/to/workspace">
+            </div>
+            <div class="form-group">
+              <label for="apiKey">API Key (可选)</label>
+              <input type="password" id="apiKey"
+                     placeholder="your-api-key">
+            </div>
+            <div class="form-group checkbox">
+              <input type="checkbox" id="useTls">
+              <label for="useTls">使用 TLS (wss://)</label>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="connectBtn">
+                连接
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- 编辑器区域 -->
+        <div id="editorPanel" class="panel editor-panel hidden">
+          <div class="editor-tabs" id="editorTabs">
+            <!-- 动态生成标签页 -->
+          </div>
+          <div class="editor-container">
+            <div class="line-numbers" id="lineNumbers"></div>
+            <textarea id="codeEditor" spellcheck="false"></textarea>
+          </div>
+          <div class="editor-footer">
+            <span id="cursorPosition">行 1, 列 1</span>
+            <span id="fileInfo"></span>
+            <div class="editor-actions">
+              <button id="saveFileBtn" class="btn btn-small">💾 保存</button>
+              <button id="formatCodeBtn" class="btn btn-small">📐 格式化</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 工具面板 -->
+        <div id="toolsPanel" class="panel tools-panel hidden">
+          <div class="tools-grid" id="toolsGrid">
+            <!-- 动态生成工具卡片 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- 右侧边栏 - 工具和日志 -->
+      <aside class="sidebar right-sidebar">
+        <div class="sidebar-tabs">
+          <button class="sidebar-tab active" data-tab="tools">🔧 工具</button>
+          <button class="sidebar-tab" data-tab="logs">📋 日志</button>
+        </div>
+
+        <div class="sidebar-content">
+          <!-- 工具列表 -->
+          <div id="toolsTab" class="tab-content active">
+            <div id="toolsList" class="tools-list">
+              <div class="empty-state">连接后加载工具</div>
+            </div>
+          </div>
+
+          <!-- 日志面板 -->
+          <div id="logsTab" class="tab-content">
+            <div class="logs-header">
+              <button id="clearLogsBtn" class="btn btn-small">清空</button>
+            </div>
+            <div id="logsContainer" class="logs-container">
+              <!-- 日志条目 -->
+            </div>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- 底部状态栏 -->
+    <footer class="status-bar">
+      <div class="status-left">
+        <span id="workspacePath">工作区: -</span>
+      </div>
+      <div class="status-center">
+        <span id="connectionInfo">-</span>
+      </div>
+      <div class="status-right">
+        <span id="toolCount">工具: 0</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 设置弹窗 -->
+  <div id="settingsModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>设置</h3>
+        <button class="modal-close" id="closeSettingsBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="settingTheme">主题</label>
+          <select id="settingTheme">
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="settingFontSize">字体大小</label>
+          <input type="number" id="settingFontSize" value="14" min="10" max="24">
+        </div>
+        <div class="form-group">
+          <label for="settingAutoReconnect">自动重连</label>
+          <input type="checkbox" id="settingAutoReconnect" checked>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 消息提示 -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>

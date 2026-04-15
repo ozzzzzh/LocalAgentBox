@@ -1,0 +1,15 @@
+{
+  "name": "agent-gateway-frontend",
+  "version": "0.1.0",
+  "description": "本地 Agent Gateway 前端界面",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "serve": "npx http-server -p 8080 -c-1"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "http-server": "^14.1.1"
+  },
+  "dependencies": {}
+}

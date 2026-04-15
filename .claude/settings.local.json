@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(gh search *)",
+      "Bash(where node *)",
+      "Bash(powershell.exe -Command \"[Environment]::GetEnvironmentVariable\\('PATH', 'Machine'\\)\")",
+      "Bash(powershell.exe -Command \"[Environment]::GetEnvironmentVariable\\('PATH', 'User'\\)\")",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" -v)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" \"/c/Program Files/nodejs/node_modules/npm/bin/npm-cli.js\" -v)",
+      "Bash(powershell.exe -Command '$env:PATH -split \";\"')",
+      "Bash(powershell.exe -Command 'node -v')",
+      "Bash(powershell.exe -Command 'npm -v')",
+      "Bash(powershell.exe -Command 'Get-Command npm -ErrorAction SilentlyContinue | Format-List *')",
+      "WebFetch(domain:platform.klingai.com)",
+      "WebFetch(domain:open.kuaishou.com)",
+      "WebFetch(domain:www.ss.pku.edu.cn)",
+      "WebFetch(domain:www.zhihu.com)"
+    ]
+  }
+}
