@@ -2,13 +2,13 @@
  * 主入口文件
  */
 
-import { AgentClient } from "./client";
-import { Logger } from "./logger";
-import { FileExplorer } from "./fileExplorer";
-import { CodeEditor } from "./codeEditor";
-import { ToolsPanel } from "./toolsPanel";
-import { Toast } from "./toast";
-import { ConnectionOptions } from "./types";
+import { AgentClient } from "./client.js";
+import { Logger } from "./logger.js";
+import { FileExplorer } from "./fileExplorer.js";
+import { CodeEditor } from "./codeEditor.js";
+import { ToolsPanel } from "./toolsPanel.js";
+import { Toast } from "./toast.js";
+import { ConnectionOptions } from "./types.js";
 
 class App {
   private client: AgentClient | null = null;
@@ -142,8 +142,8 @@ class App {
       this.updateConnectionStatus(connected);
 
       if (connected) {
-        // 初始化组件
-        this.initComponents();
+        // 连接成功后加载工具目录和节点列表
+        this.postConnect();
 
         // 显示编辑器面板
         document.getElementById("connectionPanel")?.classList.add("hidden");
@@ -174,6 +174,21 @@ class App {
       Toast.error("连接失败");
       this.logger.error("连接失败", error);
     }
+  }
+
+  /**
+   * 连接成功后：加载工具、节点，初始化 UI 组件
+   */
+  private async postConnect(): Promise<void> {
+    if (!this.client) return;
+
+    // 并行获取工具目录和节点列表
+    await Promise.all([
+      this.client.fetchToolsCatalog(),
+      this.client.fetchNodes(),
+    ]);
+
+    this.initComponents();
   }
 
   private initComponents(): void {
@@ -215,18 +230,14 @@ class App {
     const toolsList = document.getElementById("toolsList");
     if (toolsList) {
       this.toolsPanel = new ToolsPanel(toolsList, this.client);
-      setTimeout(() => {
-        this.toolsPanel?.render();
-      }, 500);
+      this.toolsPanel.render();
     }
 
     // 更新工具计数
-    setTimeout(() => {
-      const toolCount = document.getElementById("toolCount");
-      if (toolCount && this.client) {
-        toolCount.textContent = `工具: ${this.client.getTools().length}`;
-      }
-    }, 1000);
+    const toolCount = document.getElementById("toolCount");
+    if (toolCount && this.client) {
+      toolCount.textContent = `工具: ${this.client.getTools().length}`;
+    }
   }
 
   private updateConnectionStatus(connected: boolean): void {

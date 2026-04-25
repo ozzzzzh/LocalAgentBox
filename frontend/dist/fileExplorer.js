@@ -1,14 +1,28 @@
 /**
  * 文件浏览器组件
  */
-import { Logger } from "./logger";
+import { Logger } from "./logger.js";
 export class FileExplorer {
     constructor(container, client) {
         this.currentPath = "";
         this.onFileSelect = null;
+        this.nodeId = null;
         this.container = container;
         this.client = client;
         this.logger = Logger.getInstance();
+        this.findNode();
+    }
+    /**
+     * 查找可用的节点（通常是 node-host 或类似的本地执行节点）
+     */
+    async findNode() {
+        const nodes = this.client.getNodes();
+        if (nodes.length > 0) {
+            // 优先选择有文件操作能力的节点
+            const fileNode = nodes.find((n) => (n.commands || []).some((cmd) => cmd.startsWith("file.")));
+            this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+            this.logger.info(`使用节点: ${this.nodeId}`);
+        }
     }
     setOnFileSelect(handler) {
         this.onFileSelect = handler;
@@ -16,24 +30,42 @@ export class FileExplorer {
     async refresh(path = ".") {
         try {
             this.logger.info(`加载目录: ${path}`);
-            const result = (await this.client.callTool("file.list", {
+            // 如果没有节点ID，先查找
+            if (!this.nodeId) {
+                await this.findNode();
+            }
+            if (!this.nodeId) {
+                this.logger.error("没有可用的节点");
+                this.container.innerHTML = '<div class="empty-state">没有可用的节点</div>';
+                return;
+            }
+            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.list", {
                 path,
                 recursive: false,
             }));
             if (!result.success) {
                 this.logger.error(`加载失败: ${result.error}`);
+                this.container.innerHTML = `<div class="empty-state">加载失败: ${result.error}</div>`;
                 return;
             }
             this.render(result.items || []);
         }
         catch (error) {
             this.logger.error("加载文件列表失败", error);
+            this.container.innerHTML = '<div class="empty-state">加载失败</div>';
         }
     }
     async search(pattern) {
         try {
             this.logger.info(`搜索: ${pattern}`);
-            const result = (await this.client.callTool("file.search", {
+            if (!this.nodeId) {
+                await this.findNode();
+            }
+            if (!this.nodeId) {
+                this.logger.error("没有可用的节点");
+                return;
+            }
+            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.search", {
                 pattern,
                 path: ".",
             }));

@@ -1,12 +1,21 @@
 /**
  * 工具面板组件
  */
-import { Logger } from "./logger";
+import { Logger } from "./logger.js";
 export class ToolsPanel {
     constructor(container, client) {
+        this.nodeId = null;
         this.container = container;
         this.client = client;
         this.logger = Logger.getInstance();
+        this.findNode();
+    }
+    async findNode() {
+        const nodes = this.client.getNodes();
+        if (nodes.length > 0) {
+            const fileNode = nodes.find((n) => (n.commands || []).some((cmd) => cmd.startsWith("file.") || cmd.startsWith("code.")));
+            this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+        }
     }
     render() {
         const tools = this.client.getTools();
@@ -179,13 +188,14 @@ export class ToolsPanel {
         const required = tool.parameters.required || [];
         return Object.entries(props)
             .map(([name, schema]) => {
-            const inputType = this.getInputType(schema.type);
+            const schemaObj = schema;
+            const inputType = this.getInputType(schemaObj.type);
             const isRequired = required.includes(name);
             return `
           <div class="form-group">
             <label>${name} ${isRequired ? '<span style="color: var(--error-color)">*</span>' : ''}</label>
             <input type="${inputType}" name="${name}"
-                   placeholder="${schema.description || ""}"
+                   placeholder="${schemaObj.description || ""}"
                    ${isRequired ? "required" : ""}>
           </div>
         `;
@@ -202,6 +212,13 @@ export class ToolsPanel {
         return typeMap[schemaType || "string"] || "text";
     }
     async executeTool(tool, dialog) {
+        if (!this.nodeId) {
+            await this.findNode();
+        }
+        if (!this.nodeId) {
+            this.logger.error("没有可用的节点");
+            return;
+        }
         const params = {};
         const inputs = dialog.querySelectorAll(".tool-params input");
         inputs.forEach((input) => {
@@ -217,7 +234,7 @@ export class ToolsPanel {
         });
         try {
             this.logger.info(`执行工具: ${tool.name}`);
-            const result = await this.client.callTool(tool.name, params);
+            const result = await this.client.invokeNodeCommand(this.nodeId, tool.name, params);
             this.logger.success(`执行成功`, result);
             // 显示结果
             const resultDiv = document.createElement("div");

@@ -1,7 +1,7 @@
 /**
  * 代码编辑器组件
  */
-import { AgentClient } from "./client";
+import { AgentClient } from "./client.js";
 export declare class CodeEditor {
     private container;
     private lineNumbers;
@@ -14,7 +14,9 @@ export declare class CodeEditor {
     private currentFile;
     private completions;
     private completionBox;
+    private nodeId;
     constructor(container: HTMLTextAreaElement, lineNumbers: HTMLElement, tabsContainer: HTMLElement, cursorPosition: HTMLElement, fileInfo: HTMLElement, client: AgentClient);
+    private findNode;
     private init;
     openFile(path: string): Promise<void>;
     save(): Promise<void>;

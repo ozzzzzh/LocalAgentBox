@@ -2,19 +2,31 @@
  * 工具面板组件
  */
 
-import { AgentClient } from "./client";
-import { ToolDefinition } from "./types";
-import { Logger } from "./logger";
+import { AgentClient } from "./client.js";
+import { ToolDefinition } from "./types.js";
+import { Logger } from "./logger.js";
 
 export class ToolsPanel {
   private container: HTMLElement;
   private client: AgentClient;
   private logger: Logger;
+  private nodeId: string | null = null;
 
   constructor(container: HTMLElement, client: AgentClient) {
     this.container = container;
     this.client = client;
     this.logger = Logger.getInstance();
+    this.findNode();
+  }
+
+  private async findNode(): Promise<void> {
+    const nodes = this.client.getNodes();
+    if (nodes.length > 0) {
+      const fileNode = nodes.find((n) =>
+        (n.commands || []).some((cmd) => cmd.startsWith("file.") || cmd.startsWith("code."))
+      );
+      this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+    }
   }
 
   render(): void {
@@ -209,14 +221,15 @@ export class ToolsPanel {
 
     return Object.entries(props)
       .map(([name, schema]) => {
-        const inputType = this.getInputType((schema as { type?: string }).type);
+        const schemaObj = schema as { type?: string; description?: string };
+        const inputType = this.getInputType(schemaObj.type);
         const isRequired = required.includes(name);
 
         return `
           <div class="form-group">
             <label>${name} ${isRequired ? '<span style="color: var(--error-color)">*</span>' : ''}</label>
             <input type="${inputType}" name="${name}"
-                   placeholder="${(schema as { description?: string }).description || ""}"
+                   placeholder="${schemaObj.description || ""}"
                    ${isRequired ? "required" : ""}>
           </div>
         `;
@@ -235,6 +248,15 @@ export class ToolsPanel {
   }
 
   private async executeTool(tool: ToolDefinition, dialog: HTMLElement): Promise<void> {
+    if (!this.nodeId) {
+      await this.findNode();
+    }
+
+    if (!this.nodeId) {
+      this.logger.error("没有可用的节点");
+      return;
+    }
+
     const params: Record<string, unknown> = {};
     const inputs = dialog.querySelectorAll<HTMLInputElement>(".tool-params input");
 
@@ -253,7 +275,7 @@ export class ToolsPanel {
 
     try {
       this.logger.info(`执行工具: ${tool.name}`);
-      const result = await this.client.callTool(tool.name, params);
+      const result = await this.client.invokeNodeCommand(this.nodeId, tool.name, params);
 
       this.logger.success(`执行成功`, result);
 

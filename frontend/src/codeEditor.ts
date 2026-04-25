@@ -2,9 +2,9 @@
  * 代码编辑器组件
  */
 
-import { AgentClient } from "./client";
-import { Logger } from "./logger";
-import { CompletionItem } from "./types";
+import { AgentClient } from "./client.js";
+import { Logger } from "./logger.js";
+import { CompletionItem } from "./types.js";
 
 interface OpenFile {
   path: string;
@@ -25,6 +25,7 @@ export class CodeEditor {
   private currentFile: string | null = null;
   private completions: CompletionItem[] = [];
   private completionBox: HTMLDivElement | null = null;
+  private nodeId: string | null = null;
 
   constructor(
     container: HTMLTextAreaElement,
@@ -42,7 +43,18 @@ export class CodeEditor {
     this.client = client;
     this.logger = Logger.getInstance();
 
+    this.findNode();
     this.init();
+  }
+
+  private async findNode(): Promise<void> {
+    const nodes = this.client.getNodes();
+    if (nodes.length > 0) {
+      const fileNode = nodes.find((n) =>
+        (n.commands || []).some((cmd) => cmd.startsWith("file."))
+      );
+      this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+    }
   }
 
   private init(): void {
@@ -103,9 +115,18 @@ export class CodeEditor {
         return;
       }
 
+      if (!this.nodeId) {
+        await this.findNode();
+      }
+
+      if (!this.nodeId) {
+        this.logger.error("没有可用的节点");
+        return;
+      }
+
       this.logger.info(`打开文件: ${path}`);
 
-      const result = (await this.client.callTool("file.read", {
+      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.read", {
         path,
       })) as { success: boolean; content?: string; error?: string };
 
@@ -139,13 +160,18 @@ export class CodeEditor {
       return;
     }
 
+    if (!this.nodeId) {
+      this.logger.error("没有可用的节点");
+      return;
+    }
+
     const file = this.openFiles.get(this.currentFile);
     if (!file) return;
 
     try {
       this.logger.info(`保存文件: ${this.currentFile}`);
 
-      const result = (await this.client.callTool("file.write", {
+      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.write", {
         path: this.currentFile,
         content: this.container.value,
       })) as { success: boolean; error?: string };
@@ -275,7 +301,7 @@ export class CodeEditor {
   }
 
   private async triggerCompletion(): Promise<void> {
-    if (!this.currentFile) return;
+    if (!this.currentFile || !this.nodeId) return;
 
     const pos = this.container.selectionStart;
     const lines = this.container.value.substring(0, pos).split("\n");
@@ -283,7 +309,7 @@ export class CodeEditor {
     const col = lines[lines.length - 1].length;
 
     try {
-      const result = (await this.client.callTool("code.complete", {
+      const result = (await this.client.invokeNodeCommand(this.nodeId, "code.complete", {
         file_path: this.currentFile,
         line,
         column: col,

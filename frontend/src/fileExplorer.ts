@@ -2,9 +2,9 @@
  * 文件浏览器组件
  */
 
-import { AgentClient } from "./client";
-import { FileItem } from "./types";
-import { Logger } from "./logger";
+import { AgentClient } from "./client.js";
+import { FileItem } from "./types.js";
+import { Logger } from "./logger.js";
 
 export class FileExplorer {
   private container: HTMLElement;
@@ -12,11 +12,28 @@ export class FileExplorer {
   private logger: Logger;
   private currentPath: string = "";
   private onFileSelect: ((path: string) => void) | null = null;
+  private nodeId: string | null = null;
 
   constructor(container: HTMLElement, client: AgentClient) {
     this.container = container;
     this.client = client;
     this.logger = Logger.getInstance();
+    this.findNode();
+  }
+
+  /**
+   * 查找可用的节点（通常是 node-host 或类似的本地执行节点）
+   */
+  private async findNode(): Promise<void> {
+    const nodes = this.client.getNodes();
+    if (nodes.length > 0) {
+      // 优先选择有文件操作能力的节点
+      const fileNode = nodes.find((n) =>
+        (n.commands || []).some((cmd) => cmd.startsWith("file."))
+      );
+      this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+      this.logger.info(`使用节点: ${this.nodeId}`);
+    }
   }
 
   setOnFileSelect(handler: (path: string) => void): void {
@@ -27,19 +44,32 @@ export class FileExplorer {
     try {
       this.logger.info(`加载目录: ${path}`);
 
-      const result = (await this.client.callTool("file.list", {
+      // 如果没有节点ID，先查找
+      if (!this.nodeId) {
+        await this.findNode();
+      }
+
+      if (!this.nodeId) {
+        this.logger.error("没有可用的节点");
+        this.container.innerHTML = '<div class="empty-state">没有可用的节点</div>';
+        return;
+      }
+
+      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.list", {
         path,
         recursive: false,
       })) as { success: boolean; items?: FileItem[]; error?: string };
 
       if (!result.success) {
         this.logger.error(`加载失败: ${result.error}`);
+        this.container.innerHTML = `<div class="empty-state">加载失败: ${result.error}</div>`;
         return;
       }
 
       this.render(result.items || []);
     } catch (error) {
       this.logger.error("加载文件列表失败", error);
+      this.container.innerHTML = '<div class="empty-state">加载失败</div>';
     }
   }
 
@@ -47,7 +77,16 @@ export class FileExplorer {
     try {
       this.logger.info(`搜索: ${pattern}`);
 
-      const result = (await this.client.callTool("file.search", {
+      if (!this.nodeId) {
+        await this.findNode();
+      }
+
+      if (!this.nodeId) {
+        this.logger.error("没有可用的节点");
+        return;
+      }
+
+      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.search", {
         pattern,
         path: ".",
       })) as { success: boolean; results?: FileItem[]; error?: string };

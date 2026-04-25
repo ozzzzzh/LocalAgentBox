@@ -1,13 +1,14 @@
 /**
  * 代码编辑器组件
  */
-import { Logger } from "./logger";
+import { Logger } from "./logger.js";
 export class CodeEditor {
     constructor(container, lineNumbers, tabsContainer, cursorPosition, fileInfo, client) {
         this.openFiles = new Map();
         this.currentFile = null;
         this.completions = [];
         this.completionBox = null;
+        this.nodeId = null;
         this.container = container;
         this.lineNumbers = lineNumbers;
         this.tabsContainer = tabsContainer;
@@ -15,7 +16,15 @@ export class CodeEditor {
         this.fileInfo = fileInfo;
         this.client = client;
         this.logger = Logger.getInstance();
+        this.findNode();
         this.init();
+    }
+    async findNode() {
+        const nodes = this.client.getNodes();
+        if (nodes.length > 0) {
+            const fileNode = nodes.find((n) => (n.commands || []).some((cmd) => cmd.startsWith("file.")));
+            this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+        }
     }
     init() {
         // 更新行号
@@ -66,8 +75,15 @@ export class CodeEditor {
                 this.switchToFile(path);
                 return;
             }
+            if (!this.nodeId) {
+                await this.findNode();
+            }
+            if (!this.nodeId) {
+                this.logger.error("没有可用的节点");
+                return;
+            }
             this.logger.info(`打开文件: ${path}`);
-            const result = (await this.client.callTool("file.read", {
+            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.read", {
                 path,
             }));
             if (!result.success) {
@@ -95,12 +111,16 @@ export class CodeEditor {
             this.logger.warning("没有打开的文件");
             return;
         }
+        if (!this.nodeId) {
+            this.logger.error("没有可用的节点");
+            return;
+        }
         const file = this.openFiles.get(this.currentFile);
         if (!file)
             return;
         try {
             this.logger.info(`保存文件: ${this.currentFile}`);
-            const result = (await this.client.callTool("file.write", {
+            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.write", {
                 path: this.currentFile,
                 content: this.container.value,
             }));
@@ -214,14 +234,14 @@ export class CodeEditor {
         }
     }
     async triggerCompletion() {
-        if (!this.currentFile)
+        if (!this.currentFile || !this.nodeId)
             return;
         const pos = this.container.selectionStart;
         const lines = this.container.value.substring(0, pos).split("\n");
         const line = lines.length - 1;
         const col = lines[lines.length - 1].length;
         try {
-            const result = (await this.client.callTool("code.complete", {
+            const result = (await this.client.invokeNodeCommand(this.nodeId, "code.complete", {
                 file_path: this.currentFile,
                 line,
                 column: col,

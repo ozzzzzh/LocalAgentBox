@@ -1,5 +1,5 @@
 /**
- * 消息类型定义
+ * OpenClaw Gateway 帧协议类型定义
  */
 export {};
 //# sourceMappingURL=types.js.map

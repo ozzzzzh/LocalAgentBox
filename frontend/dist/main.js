@@ -1,12 +1,12 @@
 /**
  * 主入口文件
  */
-import { AgentClient } from "./client";
-import { Logger } from "./logger";
-import { FileExplorer } from "./fileExplorer";
-import { CodeEditor } from "./codeEditor";
-import { ToolsPanel } from "./toolsPanel";
-import { Toast } from "./toast";
+import { AgentClient } from "./client.js";
+import { Logger } from "./logger.js";
+import { FileExplorer } from "./fileExplorer.js";
+import { CodeEditor } from "./codeEditor.js";
+import { ToolsPanel } from "./toolsPanel.js";
+import { Toast } from "./toast.js";
 class App {
     constructor() {
         this.client = null;
@@ -114,8 +114,8 @@ class App {
         this.client.onConnectionChange((connected) => {
             this.updateConnectionStatus(connected);
             if (connected) {
-                // 初始化组件
-                this.initComponents();
+                // 连接成功后加载工具目录和节点列表
+                this.postConnect();
                 // 显示编辑器面板
                 document.getElementById("connectionPanel")?.classList.add("hidden");
                 document.getElementById("editorPanel")?.classList.remove("hidden");
@@ -143,6 +143,19 @@ class App {
             Toast.error("连接失败");
             this.logger.error("连接失败", error);
         }
+    }
+    /**
+     * 连接成功后：加载工具、节点，初始化 UI 组件
+     */
+    async postConnect() {
+        if (!this.client)
+            return;
+        // 并行获取工具目录和节点列表
+        await Promise.all([
+            this.client.fetchToolsCatalog(),
+            this.client.fetchNodes(),
+        ]);
+        this.initComponents();
     }
     initComponents() {
         if (!this.client)
@@ -172,17 +185,13 @@ class App {
         const toolsList = document.getElementById("toolsList");
         if (toolsList) {
             this.toolsPanel = new ToolsPanel(toolsList, this.client);
-            setTimeout(() => {
-                this.toolsPanel?.render();
-            }, 500);
+            this.toolsPanel.render();
         }
         // 更新工具计数
-        setTimeout(() => {
-            const toolCount = document.getElementById("toolCount");
-            if (toolCount && this.client) {
-                toolCount.textContent = `工具: ${this.client.getTools().length}`;
-            }
-        }, 1000);
+        const toolCount = document.getElementById("toolCount");
+        if (toolCount && this.client) {
+            toolCount.textContent = `工具: ${this.client.getTools().length}`;
+        }
     }
     updateConnectionStatus(connected) {
         const statusDot = document.querySelector(".status-dot");

@@ -1,11 +1,46 @@
 /**
- * 消息类型定义
+ * OpenClaw Gateway 帧协议类型定义
  */
-export type MessageType = "file.read" | "file.write" | "file.list" | "file.delete" | "file.exists" | "file.info" | "file.search" | "file.move" | "file.copy" | "code.complete" | "code.diagnose" | "editor.open" | "editor.list" | "workspace.info" | "capabilities" | "tool.call" | "response" | "error" | "ping" | "pong";
-export interface Message {
-    type: MessageType;
+export interface RequestFrame {
+    type: "req";
     id: string;
-    payload: Record<string, unknown>;
+    method: string;
+    params?: unknown;
+}
+export interface ResponseFrame {
+    type: "res";
+    id: string;
+    ok: boolean;
+    payload?: unknown;
+    error?: {
+        code?: string;
+        message?: string;
+    };
+}
+export interface EventFrame {
+    type: "event";
+    event: string;
+    payload?: unknown;
+    seq?: number;
+}
+export type Frame = RequestFrame | ResponseFrame | EventFrame;
+export interface ConnectParams {
+    minProtocol: number;
+    maxProtocol: number;
+    client: {
+        id: string;
+        mode: string;
+        version: string;
+        platform: string;
+        displayName?: string;
+    };
+    auth?: {
+        token?: string;
+        password?: string;
+    };
+    role?: string;
+    scopes?: string[];
+    caps?: string[];
 }
 export interface ToolDefinition {
     name: string;
@@ -45,4 +80,13 @@ export interface ConnectionOptions {
     apiKey?: string;
     useTls?: boolean;
     autoReconnect?: boolean;
+}
+export interface NodeInfo {
+    nodeId: string;
+    displayName?: string;
+    platform?: string;
+    version?: string;
+    caps?: string[];
+    commands?: string[];
+    online?: boolean;
 }
