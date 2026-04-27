@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent Gateway Client</title>
+  <title>AgentBox IDE</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -11,7 +11,7 @@
     <!-- 顶部工具栏 -->
     <header class="toolbar">
       <div class="toolbar-left">
-        <h1 class="logo">🤖 Agent Gateway</h1>
+        <h1 class="logo">🤖 AgentBox IDE</h1>
       </div>
       <div class="toolbar-center">
         <div class="connection-status" id="connectionStatus">
@@ -20,16 +20,17 @@
         </div>
       </div>
       <div class="toolbar-right">
+        <span id="currentFile" class="current-file"></span>
         <button id="settingsBtn" class="btn btn-icon" title="设置">⚙️</button>
       </div>
     </header>
 
-    <!-- 主内容区 -->
-    <main class="main-content">
+    <!-- 主内容区 - IDE 布局 -->
+    <main class="main-content ide-layout">
       <!-- 左侧边栏 - 文件浏览器 -->
-      <aside class="sidebar" id="sidebar">
+      <aside class="sidebar left-sidebar" id="sidebar">
         <div class="sidebar-header">
-          <span>📁 文件浏览器</span>
+          <span>📁 文件</span>
           <button id="refreshFilesBtn" class="btn btn-small" title="刷新">🔄</button>
         </div>
         <div class="file-tree" id="fileTree">
@@ -37,27 +38,22 @@
         </div>
       </aside>
 
-      <!-- 中间内容区 -->
-      <section class="content-area">
+      <!-- 中间内容区 - Chat + Editor -->
+      <section class="center-area">
         <!-- 连接面板 -->
         <div id="connectionPanel" class="panel connection-panel">
-          <h2>连接到 Gateway</h2>
+          <h2>连接到 OpenClaw Gateway</h2>
           <form id="connectionForm">
             <div class="form-group">
               <label for="gatewayUrl">Gateway 地址</label>
               <input type="text" id="gatewayUrl"
-                     placeholder="ws://localhost:18789"
-                     value="ws://localhost:18789">
+                     placeholder="ws://192.168.99.5:18789"
+                     value="ws://192.168.99.5:18789">
             </div>
             <div class="form-group">
-              <label for="workspace">工作区路径</label>
-              <input type="text" id="workspace"
-                     placeholder="/path/to/workspace">
-            </div>
-            <div class="form-group">
-              <label for="apiKey">API Key (可选)</label>
+              <label for="apiKey">Token</label>
               <input type="password" id="apiKey"
-                     placeholder="your-api-key">
+                     placeholder="your-token">
             </div>
             <div class="form-group checkbox">
               <input type="checkbox" id="useTls">
@@ -71,34 +67,66 @@
           </form>
         </div>
 
-        <!-- 编辑器区域 -->
-        <div id="editorPanel" class="panel editor-panel hidden">
-          <div class="editor-tabs" id="editorTabs">
-            <!-- 动态生成标签页 -->
-          </div>
-          <div class="editor-container">
-            <div class="line-numbers" id="lineNumbers"></div>
-            <textarea id="codeEditor" spellcheck="false"></textarea>
-          </div>
-          <div class="editor-footer">
-            <span id="cursorPosition">行 1, 列 1</span>
-            <span id="fileInfo"></span>
-            <div class="editor-actions">
-              <button id="saveFileBtn" class="btn btn-small">💾 保存</button>
-              <button id="formatCodeBtn" class="btn btn-small">📐 格式化</button>
+        <!-- IDE 主区域：Chat 上方 + Editor下方 -->
+        <div id="idePanel" class="panel ide-panel hidden">
+          <!-- Chat 对话区 -->
+          <div class="chat-section">
+            <div class="chat-header">
+              <span>💬 AI Assistant</span>
+              <div class="chat-actions">
+                <button id="clearChatBtn" class="btn btn-small" title="清空对话">🗑️</button>
+                <button id="newSessionBtn" class="btn btn-small" title="新会话">➕</button>
+              </div>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+              <div class="welcome-message">
+                <div class="welcome-icon">🤖</div>
+                <div class="welcome-text">
+                  <h3>欢迎使用 AgentBox IDE</h3>
+                  <p>我可以帮你：</p>
+                  <ul>
+                    <li>📝 编写和修改代码</li>
+                    <li>🔍 分析文件内容</li>
+                    <li>🔧 执行工具命令</li>
+                    <li>💡 解答编程问题</li>
+                  </ul>
+                  <p class="hint">输入消息开始对话，或使用 @ 引用当前文件</p>
+                </div>
+              </div>
+            </div>
+            <div class="chat-input-area">
+              <div class="chat-context" id="chatContext">
+                <span class="context-label">当前文件:</span>
+                <span class="context-file" id="contextFile">-</span>
+              </div>
+              <div class="chat-input-wrapper">
+                <textarea id="chatInput" placeholder="输入消息... 使用 @ 引用当前文件，Enter 发送" rows="3"></textarea>
+                <button id="sendChatBtn" class="btn btn-primary" title="发送">📤</button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <!-- 工具面板 -->
-        <div id="toolsPanel" class="panel tools-panel hidden">
-          <div class="tools-grid" id="toolsGrid">
-            <!-- 动态生成工具卡片 -->
+          <!-- 编辑器区域 -->
+          <div class="editor-section">
+            <div class="editor-tabs" id="editorTabs">
+              <!-- 动态生成标签页 -->
+            </div>
+            <div class="editor-container">
+              <div class="line-numbers" id="lineNumbers"></div>
+              <textarea id="codeEditor" spellcheck="false"></textarea>
+            </div>
+            <div class="editor-footer">
+              <span id="cursorPosition">行 1, 列 1</span>
+              <span id="fileInfo"></span>
+              <div class="editor-actions">
+                <button id="saveFileBtn" class="btn btn-small">💾 保存</button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- 右侧边栏 - 工具和日志 -->
+      <!-- 右侧边栏 - 工具面板 -->
       <aside class="sidebar right-sidebar">
         <div class="sidebar-tabs">
           <button class="sidebar-tab active" data-tab="tools">🔧 工具</button>
@@ -136,6 +164,7 @@
       </div>
       <div class="status-right">
         <span id="toolCount">工具: 0</span>
+        <span id="sessionInfo">会话: -</span>
       </div>
     </footer>
   </div>

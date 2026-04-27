@@ -1,5 +1,6 @@
 /**
  * 文件浏览器组件
+ * 使用 system.run 执行 shell 命令来实现文件操作
  */
 import { Logger } from "./logger.js";
 export class FileExplorer {
@@ -13,14 +14,12 @@ export class FileExplorer {
         this.findNode();
     }
     /**
-     * 查找可用的节点（通常是 node-host 或类似的本地执行节点）
+     * 查找可用的节点
      */
     async findNode() {
         const nodes = this.client.getNodes();
         if (nodes.length > 0) {
-            // 优先选择有文件操作能力的节点
-            const fileNode = nodes.find((n) => (n.commands || []).some((cmd) => cmd.startsWith("file.")));
-            this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+            this.nodeId = nodes[0].nodeId;
             this.logger.info(`使用节点: ${this.nodeId}`);
         }
     }
@@ -30,7 +29,6 @@ export class FileExplorer {
     async refresh(path = ".") {
         try {
             this.logger.info(`加载目录: ${path}`);
-            // 如果没有节点ID，先查找
             if (!this.nodeId) {
                 await this.findNode();
             }
@@ -39,21 +37,89 @@ export class FileExplorer {
                 this.container.innerHTML = '<div class="empty-state">没有可用的节点</div>';
                 return;
             }
-            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.list", {
-                path,
-                recursive: false,
-            }));
+            // 使用 ls 命令获取目录内容，指定绝对路径
+            const workspace = "/root/.openclaw/workspace";
+            const targetPath = path === "." ? workspace : path;
+            const cmd = `ls -la "${targetPath}"`;
+            this.logger.debug(`执行命令: ${cmd}`);
+            const result = await this.runCommand(cmd);
             if (!result.success) {
                 this.logger.error(`加载失败: ${result.error}`);
                 this.container.innerHTML = `<div class="empty-state">加载失败: ${result.error}</div>`;
                 return;
             }
-            this.render(result.items || []);
+            this.logger.debug(`命令输出: ${result.output?.substring(0, 200)}...`);
+            const items = this.parseLsOutput(result.output || "", targetPath);
+            this.render(items);
         }
         catch (error) {
             this.logger.error("加载文件列表失败", error);
             this.container.innerHTML = '<div class="empty-state">加载失败</div>';
         }
+    }
+    /**
+     * 执行 shell 命令
+     */
+    async runCommand(shellCommand) {
+        try {
+            // system.run 需要 command 参数为 ["bash", "-lc", "command"] 格式
+            const result = await this.client.invokeNodeCommand(this.nodeId, "system.run", {
+                command: ["bash", "-lc", shellCommand],
+                timeoutMs: 10000,
+            });
+            this.logger.debug(`system.run 结果: ${JSON.stringify(result)?.substring(0, 300)}...`);
+            // system.run 返回格式是 { ok, nodeId, command, payload: { exitCode, stdout, stderr, success, timedOut, error } }
+            if (result && typeof result === "object") {
+                const outer = result;
+                const payload = outer.payload;
+                // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true 且有输出
+                if (outer.ok === true && payload) {
+                    if ((payload.exitCode === 0 || payload.success === true) && payload.stdout) {
+                        return {
+                            success: true,
+                            output: payload.stdout,
+                        };
+                    }
+                }
+                // 失败的情况
+                const errorMsg = payload?.error || payload?.stderr || `命令执行失败`;
+                return {
+                    success: false,
+                    error: errorMsg,
+                };
+            }
+            return { success: true, output: String(result) };
+        }
+        catch (error) {
+            return { success: false, error: String(error) };
+        }
+    }
+    /**
+     * 解析 ls -la 输出为文件列表
+     */
+    parseLsOutput(output, basePath) {
+        const items = [];
+        const lines = output.split("\n").slice(1); // 跳过 "total xxx" 行
+        for (const line of lines) {
+            if (!line.trim())
+                continue;
+            const match = line.match(/^([d-])([rwx-]+)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\d+\s+[\d:]+\s+(.+)$/);
+            if (!match)
+                continue;
+            const isDir = match[1] === "d";
+            const name = match[4].trim();
+            // 跳过 . 和 ..
+            if (name === "." || name === "..")
+                continue;
+            const fullPath = basePath === "." ? name : `${basePath}/${name}`;
+            items.push({
+                name,
+                path: fullPath,
+                type: isDir ? "directory" : "file",
+                size: isDir ? undefined : parseInt(match[3], 10),
+            });
+        }
+        return items;
     }
     async search(pattern) {
         try {
@@ -65,15 +131,19 @@ export class FileExplorer {
                 this.logger.error("没有可用的节点");
                 return;
             }
-            const result = (await this.client.invokeNodeCommand(this.nodeId, "file.search", {
-                pattern,
-                path: ".",
-            }));
+            // 使用 find 命令搜索
+            const result = await this.runCommand(`find . -name "*${pattern}*" -type f 2>/dev/null | head -50`);
             if (!result.success) {
                 this.logger.error(`搜索失败: ${result.error}`);
                 return;
             }
-            this.renderSearchResults(result.results || []);
+            const files = (result.output || "").split("\n").filter((f) => f.trim());
+            const items = files.map((f) => ({
+                name: f.split("/").pop() || f,
+                path: f,
+                type: "file",
+            }));
+            this.renderSearchResults(items);
         }
         catch (error) {
             this.logger.error("搜索失败", error);

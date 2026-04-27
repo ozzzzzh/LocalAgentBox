@@ -6,6 +6,7 @@ import { Logger } from "./logger.js";
 import { FileExplorer } from "./fileExplorer.js";
 import { CodeEditor } from "./codeEditor.js";
 import { ToolsPanel } from "./toolsPanel.js";
+import { ChatPanel } from "./chatPanel.js";
 import { Toast } from "./toast.js";
 class App {
     constructor() {
@@ -13,6 +14,7 @@ class App {
         this.fileExplorer = null;
         this.codeEditor = null;
         this.toolsPanel = null;
+        this.chatPanel = null;
         this.logger = Logger.getInstance();
         this.init();
     }
@@ -59,6 +61,20 @@ class App {
         clearLogsBtn?.addEventListener("click", () => {
             this.logger.clear();
         });
+        // 清空聊天
+        const clearChatBtn = document.getElementById("clearChatBtn");
+        clearChatBtn?.addEventListener("click", () => {
+            if (this.chatPanel) {
+                this.chatPanel.clear();
+            }
+        });
+        // 新会话
+        const newSessionBtn = document.getElementById("newSessionBtn");
+        newSessionBtn?.addEventListener("click", () => {
+            if (this.chatPanel) {
+                this.chatPanel.clear();
+            }
+        });
         // 侧边栏标签切换
         const sidebarTabs = document.querySelectorAll(".sidebar-tab");
         sidebarTabs.forEach((tab) => {
@@ -98,12 +114,10 @@ class App {
     }
     async handleConnect() {
         const gatewayUrl = document.getElementById("gatewayUrl")?.value;
-        const workspace = document.getElementById("workspace")?.value;
         const apiKey = document.getElementById("apiKey")?.value;
         const useTls = document.getElementById("useTls")?.checked;
         const options = {
             gatewayUrl,
-            workspace,
             apiKey: apiKey || undefined,
             useTls,
             autoReconnect: true,
@@ -116,23 +130,19 @@ class App {
             if (connected) {
                 // 连接成功后加载工具目录和节点列表
                 this.postConnect();
-                // 显示编辑器面板
+                // 显示 IDE 面板
                 document.getElementById("connectionPanel")?.classList.add("hidden");
-                document.getElementById("editorPanel")?.classList.remove("hidden");
+                document.getElementById("idePanel")?.classList.remove("hidden");
             }
             else {
                 // 显示连接面板
                 document.getElementById("connectionPanel")?.classList.remove("hidden");
-                document.getElementById("editorPanel")?.classList.add("hidden");
+                document.getElementById("idePanel")?.classList.add("hidden");
             }
         });
         try {
             await this.client.connect();
             // 更新状态栏
-            const workspacePath = document.getElementById("workspacePath");
-            if (workspacePath) {
-                workspacePath.textContent = `工作区: ${workspace || "未设置"}`;
-            }
             const connectionInfo = document.getElementById("connectionInfo");
             if (connectionInfo) {
                 connectionInfo.textContent = gatewayUrl;
@@ -169,6 +179,15 @@ class App {
             this.fileExplorer.setOnFileSelect((path) => {
                 if (this.codeEditor) {
                     this.codeEditor.openFile(path);
+                    // 更新聊天面板的当前文件
+                    if (this.chatPanel) {
+                        this.chatPanel.setCurrentFile(path);
+                    }
+                    // 更新顶部当前文件显示
+                    const currentFileEl = document.getElementById("currentFile");
+                    if (currentFileEl) {
+                        currentFileEl.textContent = path.split("/").pop() || path;
+                    }
                 }
             });
         }
@@ -180,6 +199,18 @@ class App {
         const fileInfo = document.getElementById("fileInfo");
         if (editor && lineNumbers && editorTabs && cursorPosition && fileInfo) {
             this.codeEditor = new CodeEditor(editor, lineNumbers, editorTabs, cursorPosition, fileInfo, this.client);
+        }
+        // 聊天面板
+        const chatSection = document.querySelector(".chat-section");
+        const chatMessages = document.getElementById("chatMessages");
+        const chatInput = document.getElementById("chatInput");
+        const sendChatBtn = document.getElementById("sendChatBtn");
+        if (chatSection && chatMessages && chatInput && sendChatBtn) {
+            this.chatPanel = new ChatPanel(chatSection, chatMessages, chatInput, sendChatBtn, this.client);
+            // 关联编辑器
+            if (this.codeEditor) {
+                this.chatPanel.setEditor(this.codeEditor);
+            }
         }
         // 工具面板
         const toolsList = document.getElementById("toolsList");

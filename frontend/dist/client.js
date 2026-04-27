@@ -112,6 +112,13 @@ export class AgentClient {
                 displayName: "AgentBox Frontend",
             },
             role: "operator", // operator 角色 + token 认证可跳过设备身份验证
+            scopes: [
+                "operator.read",
+                "operator.write",
+                "operator.admin",
+                "operator.approvals",
+                "operator.pairing",
+            ],
         };
         if (this.options.apiKey) {
             connectParams.auth = { token: this.options.apiKey };

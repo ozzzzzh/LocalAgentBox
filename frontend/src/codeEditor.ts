@@ -1,5 +1,6 @@
 /**
  * 代码编辑器组件
+ * 使用 system.run 执行 shell 命令来实现文件操作
  */
 
 import { AgentClient } from "./client.js";
@@ -50,10 +51,7 @@ export class CodeEditor {
   private async findNode(): Promise<void> {
     const nodes = this.client.getNodes();
     if (nodes.length > 0) {
-      const fileNode = nodes.find((n) =>
-        (n.commands || []).some((cmd) => cmd.startsWith("file."))
-      );
-      this.nodeId = fileNode?.nodeId || nodes[0].nodeId;
+      this.nodeId = nodes[0].nodeId;
     }
   }
 
@@ -95,16 +93,64 @@ export class CodeEditor {
         e.preventDefault();
         this.save();
       }
-
-      // Ctrl+Space 触发补全
-      if (e.ctrlKey && e.key === " ") {
-        e.preventDefault();
-        this.triggerCompletion();
-      }
     });
 
     // 创建补全框
     this.createCompletionBox();
+  }
+
+  /**
+   * 执行 shell 命令
+   */
+  private async runCommand(shellCommand: string): Promise<{ success: boolean; output?: string; error?: string }> {
+    try {
+      if (!this.nodeId) {
+        return { success: false, error: "没有可用的节点" };
+      }
+
+      // system.run 需要 command 参数为 ["bash", "-lc", "command"] 格式
+      const result = await this.client.invokeNodeCommand(this.nodeId, "system.run", {
+        command: ["bash", "-lc", shellCommand],
+        timeoutMs: 30000,
+      });
+
+      // system.run 返回格式是 { ok, nodeId, command, payload: { exitCode, stdout, stderr, success, timedOut, error } }
+      if (result && typeof result === "object") {
+        const outer = result as {
+          ok?: boolean;
+          payload?: {
+            exitCode?: number;
+            stdout?: string;
+            stderr?: string;
+            success?: boolean;
+            timedOut?: boolean;
+            error?: string | null;
+          };
+        };
+
+        const payload = outer.payload;
+
+        // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true 且有输出
+        if (outer.ok === true && payload) {
+          if ((payload.exitCode === 0 || payload.success === true) && payload.stdout) {
+            return {
+              success: true,
+              output: payload.stdout,
+            };
+          }
+        }
+
+        // 失败的情况
+        const errorMsg = payload?.error || payload?.stderr || `命令执行失败`;
+        return {
+          success: false,
+          error: errorMsg,
+        };
+      }
+      return { success: true, output: String(result) };
+    } catch (error) {
+      return { success: false, error: String(error) };
+    }
   }
 
   async openFile(path: string): Promise<void> {
@@ -126,9 +172,8 @@ export class CodeEditor {
 
       this.logger.info(`打开文件: ${path}`);
 
-      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.read", {
-        path,
-      })) as { success: boolean; content?: string; error?: string };
+      // 使用 cat 命令读取文件
+      const result = await this.runCommand(`cat "${path}"`);
 
       if (!result.success) {
         this.logger.error(`打开失败: ${result.error}`);
@@ -138,7 +183,7 @@ export class CodeEditor {
       // 添加到打开文件列表
       this.openFiles.set(path, {
         path,
-        content: result.content || "",
+        content: result.output || "",
         modified: false,
       });
 
@@ -171,17 +216,18 @@ export class CodeEditor {
     try {
       this.logger.info(`保存文件: ${this.currentFile}`);
 
-      const result = (await this.client.invokeNodeCommand(this.nodeId, "file.write", {
-        path: this.currentFile,
-        content: this.container.value,
-      })) as { success: boolean; error?: string };
+      const content = this.container.value;
+
+      // 使用 base64 编码传输
+      const base64Content = btoa(unescape(encodeURIComponent(content)));
+      const result = await this.runCommand(`echo "${base64Content}" | base64 -d > "${this.currentFile}"`);
 
       if (!result.success) {
         this.logger.error(`保存失败: ${result.error}`);
         return;
       }
 
-      file.content = this.container.value;
+      file.content = content;
       file.modified = false;
 
       this.renderTabs();
@@ -213,6 +259,17 @@ export class CodeEditor {
 
   getCurrentFile(): string | null {
     return this.currentFile;
+  }
+
+  getCurrentContent(): string | null {
+    if (!this.currentFile) return null;
+    return this.container.value;
+  }
+
+  setContent(content: string): void {
+    this.container.value = content;
+    this.updateLineNumbers();
+    this.markModified();
   }
 
   private switchToFile(path: string): void {
@@ -300,30 +357,6 @@ export class CodeEditor {
     }
   }
 
-  private async triggerCompletion(): Promise<void> {
-    if (!this.currentFile || !this.nodeId) return;
-
-    const pos = this.container.selectionStart;
-    const lines = this.container.value.substring(0, pos).split("\n");
-    const line = lines.length - 1;
-    const col = lines[lines.length - 1].length;
-
-    try {
-      const result = (await this.client.invokeNodeCommand(this.nodeId, "code.complete", {
-        file_path: this.currentFile,
-        line,
-        column: col,
-        content: this.container.value,
-      })) as { success: boolean; completions?: CompletionItem[]; error?: string };
-
-      if (result.success && result.completions) {
-        this.showCompletions(result.completions);
-      }
-    } catch (error) {
-      this.logger.error("获取补全失败", error);
-    }
-  }
-
   private createCompletionBox(): void {
     this.completionBox = document.createElement("div");
     this.completionBox.className = "completion-box hidden";
@@ -339,61 +372,6 @@ export class CodeEditor {
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     `;
     document.body.appendChild(this.completionBox);
-  }
-
-  private showCompletions(completions: CompletionItem[]): void {
-    if (!this.completionBox || completions.length === 0) return;
-
-    const html = completions
-      .slice(0, 20)
-      .map(
-        (c, i) => `
-        <div class="completion-item" data-index="${i}" data-text="${this.escapeHtml(c.insert_text || c.text)}">
-          <span class="completion-kind ${c.kind}">${this.getKindIcon(c.kind)}</span>
-          <span class="completion-text">${this.escapeHtml(c.display_text)}</span>
-          ${c.detail ? `<span class="completion-detail">${this.escapeHtml(c.detail)}</span>` : ""}
-        </div>
-      `
-      )
-      .join("");
-
-    this.completionBox.innerHTML = html;
-    this.completionBox.classList.remove("hidden");
-
-    // 定位
-    const rect = this.container.getBoundingClientRect();
-    // 简化定位，实际应该根据光标位置计算
-    this.completionBox.style.left = `${rect.left + 50}px`;
-    this.completionBox.style.top = `${rect.top + 100}px`;
-
-    // 绑定点击
-    this.completionBox.querySelectorAll(".completion-item").forEach((el) => {
-      el.addEventListener("click", () => {
-        const text = el.getAttribute("data-text");
-        if (text) {
-          this.insertCompletion(text);
-        }
-      });
-    });
-  }
-
-  private insertCompletion(text: string): void {
-    const start = this.container.selectionStart;
-    const end = this.container.selectionEnd;
-    const value = this.container.value;
-
-    // 找到当前词的开始位置
-    let wordStart = start;
-    while (wordStart > 0 && /\w/.test(value[wordStart - 1])) {
-      wordStart--;
-    }
-
-    this.container.value = value.substring(0, wordStart) + text + value.substring(end);
-    this.container.selectionStart = this.container.selectionEnd = wordStart + text.length;
-
-    this.hideCompletions();
-    this.updateLineNumbers();
-    this.markModified();
   }
 
   private hideCompletions(): void {
