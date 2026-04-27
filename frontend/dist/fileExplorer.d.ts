@@ -18,6 +18,10 @@ export declare class FileExplorer {
     setOnFileSelect(handler: (path: string) => void): void;
     refresh(path?: string): Promise<void>;
     /**
+     * 获取父目录路径
+     */
+    private getParentPath;
+    /**
      * 执行 shell 命令
      */
     private runCommand;

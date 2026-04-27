@@ -49,6 +49,11 @@ class App {
                 this.fileExplorer.refresh(".");
             }
         });
+        // 新建文件
+        const newFileBtn = document.getElementById("newFileBtn");
+        newFileBtn?.addEventListener("click", () => {
+            this.createNewFile();
+        });
         // 保存文件
         const saveFileBtn = document.getElementById("saveFileBtn");
         saveFileBtn?.addEventListener("click", () => {
@@ -222,6 +227,25 @@ class App {
         const toolCount = document.getElementById("toolCount");
         if (toolCount && this.client) {
             toolCount.textContent = `工具: ${this.client.getTools().length}`;
+        }
+    }
+    /**
+     * 创建新文件
+     */
+    createNewFile() {
+        const fileName = prompt("请输入文件名（如 newfile.txt 或 src/newfile.ts）:");
+        if (!fileName || !fileName.trim())
+            return;
+        const workspace = "/root/.openclaw/workspace";
+        const fullPath = fileName.startsWith("/") ? fileName : `${workspace}/${fileName}`;
+        if (this.codeEditor) {
+            this.codeEditor.createFile(fullPath).then((success) => {
+                if (success && this.fileExplorer) {
+                    // 刷新文件列表
+                    const dir = fullPath.substring(0, fullPath.lastIndexOf("/")) || workspace;
+                    this.fileExplorer.refresh(dir);
+                }
+            });
         }
     }
     updateConnectionStatus(connected) {

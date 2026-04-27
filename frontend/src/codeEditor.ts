@@ -130,18 +130,25 @@ export class CodeEditor {
 
         const payload = outer.payload;
 
-        // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true 且有输出
+        // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true
         if (outer.ok === true && payload) {
-          if ((payload.exitCode === 0 || payload.success === true) && payload.stdout) {
+          if (payload.exitCode === 0 || payload.success === true) {
             return {
               success: true,
-              output: payload.stdout,
+              output: payload.stdout ?? "",
             };
           }
         }
 
-        // 失败的情况
-        const errorMsg = payload?.error || payload?.stderr || `命令执行失败`;
+        // 失败的情况 - 有 stderr 也可以算部分成功
+        if (outer.ok === true && payload?.exitCode === 0) {
+          return {
+            success: true,
+            output: payload.stdout ?? "",
+          };
+        }
+
+        const errorMsg = payload?.error || payload?.stderr || `命令执行失败 (exitCode=${payload?.exitCode})`;
         return {
           success: false,
           error: errorMsg,
@@ -218,9 +225,12 @@ export class CodeEditor {
 
       const content = this.container.value;
 
-      // 使用 base64 编码传输
+      // 使用 base64 编码来安全传输文件内容
+      // Node.js 环境: 使用 Buffer, 浏览器环境: 使用 btoa
       const base64Content = btoa(unescape(encodeURIComponent(content)));
-      const result = await this.runCommand(`echo "${base64Content}" | base64 -d > "${this.currentFile}"`);
+      const saveCmd = `echo "${base64Content}" | base64 -d > "${this.currentFile}"`;
+
+      const result = await this.runCommand(saveCmd);
 
       if (!result.success) {
         this.logger.error(`保存失败: ${result.error}`);
@@ -236,6 +246,39 @@ export class CodeEditor {
       this.logger.success("文件已保存");
     } catch (error) {
       this.logger.error("保存失败", error);
+    }
+  }
+
+  /**
+   * 创建新文件
+   */
+  async createFile(path: string): Promise<boolean> {
+    if (!this.nodeId) {
+      this.logger.error("没有可用的节点");
+      return false;
+    }
+
+    try {
+      // 检查文件是否已存在
+      const checkResult = await this.runCommand(`test -f "${path}" && echo "exists"`);
+      if (checkResult.success && checkResult.output?.includes("exists")) {
+        this.logger.error(`文件已存在: ${path}`);
+        return false;
+      }
+
+      // 创建空文件
+      const result = await this.runCommand(`touch "${path}"`);
+      if (!result.success) {
+        this.logger.error(`创建失败: ${result.error}`);
+        return false;
+      }
+
+      // 打开新创建的文件
+      await this.openFile(path);
+      return true;
+    } catch (error) {
+      this.logger.error("创建文件失败", error);
+      return false;
     }
   }
 

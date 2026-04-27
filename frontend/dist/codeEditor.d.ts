@@ -25,6 +25,10 @@ export declare class CodeEditor {
     private runCommand;
     openFile(path: string): Promise<void>;
     save(): Promise<void>;
+    /**
+     * 创建新文件
+     */
+    createFile(path: string): Promise<boolean>;
     closeFile(path: string): void;
     getCurrentFile(): string | null;
     getCurrentContent(): string | null;

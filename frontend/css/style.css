@@ -175,6 +175,11 @@ body {
   border-bottom: 1px solid var(--border-color);
 }
 
+.file-actions {
+  display: flex;
+  gap: 4px;
+}
+
 /* ===== 侧边栏标签 ===== */
 .sidebar-tabs {
   display: flex;
@@ -274,6 +279,15 @@ body {
 
 .file-children {
   padding-left: 16px;
+}
+
+.file-item.parent-dir {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-item.parent-dir:hover {
+  background: var(--bg-hover);
 }
 
 /* ===== 内容区域 ===== */

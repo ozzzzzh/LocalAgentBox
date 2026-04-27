@@ -54,6 +54,10 @@ export class FileExplorer {
       // 使用 ls 命令获取目录内容，指定绝对路径
       const workspace = "/root/.openclaw/workspace";
       const targetPath = path === "." ? workspace : path;
+
+      // 保存当前路径
+      this.currentPath = targetPath;
+
       const cmd = `ls -la "${targetPath}"`;
       this.logger.debug(`执行命令: ${cmd}`);
 
@@ -72,6 +76,17 @@ export class FileExplorer {
       this.logger.error("加载文件列表失败", error);
       this.container.innerHTML = '<div class="empty-state">加载失败</div>';
     }
+  }
+
+  /**
+   * 获取父目录路径
+   */
+  private getParentPath(): string {
+    if (!this.currentPath) return "/root/.openclaw/workspace";
+    const parts = this.currentPath.split("/").filter(p => p);
+    if (parts.length <= 3) return "/root/.openclaw/workspace"; // 不超过 workspace 根目录
+    parts.pop();
+    return "/" + parts.join("/");
   }
 
   /**
@@ -103,18 +118,18 @@ export class FileExplorer {
 
         const payload = outer.payload;
 
-        // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true 且有输出
+        // 成功的情况：ok=true 且 payload.exitCode=0 或 payload.success=true
         if (outer.ok === true && payload) {
-          if ((payload.exitCode === 0 || payload.success === true) && payload.stdout) {
+          if (payload.exitCode === 0 || payload.success === true) {
             return {
               success: true,
-              output: payload.stdout,
+              output: payload.stdout ?? "",
             };
           }
         }
 
         // 失败的情况
-        const errorMsg = payload?.error || payload?.stderr || `命令执行失败`;
+        const errorMsg = payload?.error || payload?.stderr || `命令执行失败 (exitCode=${payload?.exitCode})`;
         return {
           success: false,
           error: errorMsg,
@@ -193,11 +208,6 @@ export class FileExplorer {
   }
 
   private render(items: FileItem[]): void {
-    if (items.length === 0) {
-      this.container.innerHTML = '<div class="empty-state">目录为空</div>';
-      return;
-    }
-
     // 排序：目录在前，然后按名称排序
     const sorted = [...items].sort((a, b) => {
       if (a.type !== b.type) {
@@ -206,7 +216,22 @@ export class FileExplorer {
       return a.name.localeCompare(b.name);
     });
 
-    const html = sorted
+    // 添加返回上级目录的选项（如果不在根目录）
+    const workspace = "/root/.openclaw/workspace";
+    const parentItem = this.currentPath && this.currentPath !== workspace
+      ? `<div class="file-item directory parent-dir" data-path="${this.getParentPath()}" data-type="directory">
+          <span class="icon">📁</span>
+          <span class="name">..</span>
+          <span class="size" style="color: var(--text-secondary); font-size: 11px;">返回上级</span>
+        </div>`
+      : "";
+
+    if (sorted.length === 0 && !parentItem) {
+      this.container.innerHTML = '<div class="empty-state">目录为空</div>';
+      return;
+    }
+
+    const html = parentItem + sorted
       .map((item) => {
         const ext = item.name.split(".").pop() || "";
         const icon = this.getFileIcon(item.type, ext);
