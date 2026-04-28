@@ -1,5 +1,228 @@
 # AgentBox IDE 开发日志
 
+## 2026-04-28 开发内容总结
+
+### 一、完成的功能
+
+#### 1. AI Chat 对话功能
+- 实现与 OpenClaw Gateway 的 AI Agent 对话
+- 使用 `sessions.list`、`sessions.create`、`sessions.send` 方法
+- 通过 `sessions.messages.subscribe` 订阅消息更新
+- 流式响应渲染，实时显示 AI 回复
+
+#### 2. Markdown 渲染增强
+- 支持标题 (#、##、###)
+- 支持粗体、斜体
+- 支持无序/有序列表
+- 支持代码块和行内代码
+- 支持链接和分隔线
+- 段落自动包装
+
+#### 3. IDE 布局重构
+- 新布局：文件浏览器(左) | 编辑器(中) | Chat(右)
+- 底部抽屉：工具面板和日志面板
+- 左右侧边栏支持拖拽调整大小
+- 抽屉支持高度调整
+- 新增 `layoutManager.ts` 组件
+
+#### 4. 文件操作修复
+- 空文件正确打开
+- 文件保存使用 base64 编码
+- 新增返回上级目录按钮
+
+---
+
+### 二、踩坑记录与解决方案
+
+#### 问题 1: Chat 发送失败 - unknown method
+
+**错误:** `Error: unknown method: agent.send`
+
+**原因:** OpenClaw 协议没有 `agent.send` 方法
+
+**解决方案:** 使用 session 相关方法:
+```typescript
+// 创建或获取 session
+const result = await this.client.request("sessions.create", {
+  agentId: "main",
+  message: content,
+});
+
+// 发送消息
+await this.client.request("sessions.send", {
+  key: this.sessionKey,
+  message: content,
+  idempotencyKey: this.generateId(),
+});
+
+// 订阅消息更新
+await this.client.request("sessions.messages.subscribe", { key });
+```
+
+#### 问题 2: Chat 无法接收 AI 回复
+
+**错误:** 发送消息后无响应
+
+**原因:** 未订阅 session 的消息更新
+
+**解决方案:** 在创建 session 后立即订阅:
+```typescript
+private async subscribeToSession(key: string): Promise<void> {
+  await this.client.request("sessions.messages.subscribe", { key });
+}
+```
+
+#### 问题 3: Chat 消息重复渲染
+
+**错误:** 同一条消息渲染多次
+
+**原因:** 多个事件都触发消息渲染 (`agent`、`chat`、`session.message`)
+
+**解决方案:** 只监听 `agent` 事件，忽略其他事件:
+```typescript
+if (event === "agent") {
+  const data = payload as {
+    stream?: string;
+    data?: { delta?: string; phase?: string };
+  };
+  
+  // stream: "assistant" 包含 AI 回复的增量
+  if (data.stream === "assistant" && data.data?.delta) {
+    this.handleStreamDelta(data.data.delta, false);
+  }
+  
+  // stream: "lifecycle" phase: "end" 表示回复完成
+  if (data.stream === "lifecycle" && data.data?.phase === "end") {
+    this.handleStreamDelta("", true);
+  }
+}
+```
+
+#### 问题 4: 流式消息光标不消失
+
+**错误:** AI 回复完成后，末尾的 `▌` 光标不消失
+
+**原因:** `updateStreamingMessage` 总是添加光标
+
+**解决方案:** 添加 `showCursor` 参数:
+```typescript
+private handleStreamDelta(delta: string, done?: boolean): void {
+  // ...
+  this.updateStreamingMessage(id, content, !done); // done 时隐藏光标
+}
+```
+
+#### 问题 5: 空文件打开失败
+
+**错误:** 打开空文件显示 "命令执行失败"
+
+**原因:** `payload.stdout` 检查，空字符串为 falsy
+
+**解决方案:** 检查 exitCode 而非 stdout:
+```typescript
+if (payload.exitCode === 0 || payload.success === true) {
+  return { success: true, output: payload.stdout ?? "" };
+}
+```
+
+#### 问题 6: 文件保存 heredoc 失败
+
+**错误:** 使用 heredoc 语法保存文件失败
+
+**原因:** `\n` 字符在 shell 命令字符串中不转换为实际换行符
+
+**解决方案:** 使用 base64 编码:
+```typescript
+const base64Content = btoa(unescape(encodeURIComponent(content)));
+const saveCmd = `echo "${base64Content}" | base64 -d > "${path}"`;
+```
+
+---
+
+### 三、OpenClaw Session 协议要点
+
+#### 1. Session 方法列表
+| 方法 | 用途 |
+|------|------|
+| `sessions.list` | 列出所有 session |
+| `sessions.create` | 创建新 session |
+| `sessions.send` | 发送消息到 session |
+| `sessions.messages.subscribe` | 订阅消息更新 |
+
+#### 2. Session Key 格式
+```
+agent:<agentId>:<sessionId>
+```
+例如: `agent:main:abc123`
+
+#### 3. Agent 事件结构
+```json
+{
+  "stream": "assistant",
+  "data": {
+    "delta": "增量文本内容"
+  },
+  "sessionKey": "agent:main:xxx"
+}
+```
+
+#### 4. 生命周期事件
+```json
+{
+  "stream": "lifecycle",
+  "data": {
+    "phase": "end"
+  }
+}
+```
+
+---
+
+### 四、新增组件
+
+#### layoutManager.ts
+处理布局相关的交互:
+- 左右侧边栏宽度拖拽调整
+- 底部抽屉开关和高度调整
+- 抽屉标签切换 (工具/日志)
+
+```typescript
+export class LayoutManager {
+  constructor() {
+    this.initResizeHandles();
+    this.initDrawer();
+  }
+  
+  toggleDrawer(): void;
+  openDrawer(tab?: string): void;
+  closeDrawer(): void;
+  switchDrawerTab(tab: string): void;
+}
+```
+
+---
+
+### 五、样式更新
+
+#### 新增 CSS 类
+```css
+/* 布局 */
+.new-layout { display: flex; }
+.resize-handle { cursor: col-resize; }
+.drawer { position: fixed; bottom: 0; }
+.drawer.open { transform: translateY(-100%); }
+
+/* Markdown */
+.md-h2, .md-h3, .md-h4 { /* 标题样式 */ }
+.md-ul, .md-li { /* 列表样式 */ }
+.md-link { /* 链接样式 */ }
+.md-p { /* 段落样式 */ }
+.code-block { /* 代码块样式 */ }
+.inline-code { /* 行内代码样式 */ }
+```
+
+---
+
 ## 2026-04-27 开发内容总结
 
 ### 一、完成的功能
@@ -83,26 +306,6 @@ if (outer.ok === true && payload) {
 }
 ```
 
-#### 问题 5: 空文件无法打开
-
-**错误:** 打开空文件显示 "命令执行失败"
-
-**原因:** `payload.stdout` 检查，空字符串为 falsy
-
-**解决方案:** 使用 `payload.stdout ?? ""` 并检查 exitCode 而非 stdout
-
-#### 问题 6: 文件保存失败 (heredoc 问题)
-
-**错误:** heredoc 语法在 `bash -lc` 中不工作
-
-**原因:** `\n` 字符在 shell 命令字符串中不转换为实际换行符
-
-**解决方案:** 使用 base64 编码传输文件内容
-```typescript
-const base64Content = btoa(unescape(encodeURIComponent(content)));
-const saveCmd = `echo "${base64Content}" | base64 -d > "${path}"`;
-```
-
 ---
 
 ### 三、OpenClaw Gateway 协议要点
@@ -157,6 +360,7 @@ frontend/
 │   ├── toolsPanel.ts   # 工具列表
 │   ├── logger.ts       # 日志管理
 │   ├── toast.ts        # 消息提示
+│   ├── layoutManager.ts # 布局管理
 │   └── types.ts        # TypeScript 类型定义
 └── dist/               # 编译输出
 ```
@@ -165,12 +369,12 @@ frontend/
 
 ### 五、待完成功能
 
-1. Chat 对话与 AI Agent 交互
-2. 代码补全 (completion)
-3. 文件搜索
-4. 多标签编辑器优化
-5. 拖拽上传文件
-6. Git 状态显示
+1. 代码补全 (completion)
+2. 文件搜索
+3. 多标签编辑器优化
+4. 拖拽上传文件
+5. Git 状态显示
+6. AI 工具调用可视化
 
 ---
 
@@ -216,6 +420,7 @@ openclaw node --config /root/.openclaw/openclaw.json
 2. **查看 Node 日志:** `openclaw node` 命令输出
 3. **前端调试:** Chrome DevTools → Network → WS 查看 WebSocket 消息
 4. **测试 shell 命令:** 在 workspace 目录直接执行命令验证
+5. **添加调试日志:** 在 chatPanel 中使用 `console.log` 和 `this.logger.debug`
 
 ---
 
@@ -240,6 +445,10 @@ openclaw node --config /root/.openclaw/openclaw.json
 ### 嵌套 JSON 结果解析
 网络协议返回的 JSON 往往是多层嵌套结构。需要仔细阅读文档或打印实际返回值来确定正确的访问路径。
 
----
+### 流式事件处理
+处理流式响应时：
+- 使用 buffer 累积增量内容
+- 通过特定事件（如 lifecycle end）标记完成
+- 避免多个事件触发重复渲染
 
-*日志由 Claude Code 辅助记录*
+---

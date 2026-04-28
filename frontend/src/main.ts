@@ -10,6 +10,7 @@ import { ToolsPanel } from "./toolsPanel.js";
 import { ChatPanel } from "./chatPanel.js";
 import { Toast } from "./toast.js";
 import { ConnectionOptions } from "./types.js";
+import { LayoutManager } from "./layoutManager.js";
 
 class App {
   private client: AgentClient | null = null;
@@ -18,6 +19,7 @@ class App {
   private toolsPanel: ToolsPanel | null = null;
   private chatPanel: ChatPanel | null = null;
   private logger: Logger;
+  private layoutManager: LayoutManager | null = null;
 
   constructor() {
     this.logger = Logger.getInstance();
@@ -25,6 +27,9 @@ class App {
   }
 
   private init(): void {
+    // 初始化布局管理器
+    this.layoutManager = new LayoutManager();
+
     // 初始化日志
     const logsContainer = document.getElementById("logsContainer");
     if (logsContainer) {
@@ -96,24 +101,6 @@ class App {
       if (this.chatPanel) {
         this.chatPanel.clear();
       }
-    });
-
-    // 侧边栏标签切换
-    const sidebarTabs = document.querySelectorAll(".sidebar-tab");
-    sidebarTabs.forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const tabName = tab.getAttribute("data-tab");
-
-        // 切换标签激活状态
-        sidebarTabs.forEach((t) => t.classList.remove("active"));
-        tab.classList.add("active");
-
-        // 切换内容
-        document.querySelectorAll(".tab-content").forEach((content) => {
-          content.classList.remove("active");
-        });
-        document.getElementById(`${tabName}Tab`)?.classList.add("active");
-      });
     });
 
     // 设置弹窗
@@ -252,7 +239,7 @@ class App {
       );
     }
 
-    // 聊天面板
+    // 聊天面板 - 使用 rightSidebar 作为容器
     const chatSection = document.querySelector(".chat-section") as HTMLElement;
     const chatMessages = document.getElementById("chatMessages");
     const chatInput = document.getElementById("chatInput") as HTMLTextAreaElement;
@@ -273,7 +260,7 @@ class App {
       }
     }
 
-    // 工具面板
+    // 工具面板 - 使用抽屉中的 toolsList
     const toolsList = document.getElementById("toolsList");
     if (toolsList) {
       this.toolsPanel = new ToolsPanel(toolsList, this.client);

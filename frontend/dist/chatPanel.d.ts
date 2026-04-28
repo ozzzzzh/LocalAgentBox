@@ -14,10 +14,15 @@ export declare class ChatPanel {
     private messages;
     private currentFile;
     private sessionId;
+    private sessionKey;
     private isStreaming;
     constructor(container: HTMLElement, messagesContainer: HTMLElement, input: HTMLTextAreaElement, sendBtn: HTMLButtonElement, client: AgentClient);
     setEditor(editor: CodeEditor): void;
     private init;
+    /**
+     * 订阅 session 的消息更新
+     */
+    private subscribeToSession;
     private sendMessage;
     private handleEvent;
     private streamBuffer;

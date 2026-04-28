@@ -1,6 +1,7 @@
 # LocalAgentBox
 
 本地 Agent 客户端，用于连接云端 Gateway，提供文件操作、代码补全、编辑器集成等能力。
+![预览](preview.png)
 
 ## 功能特性
 

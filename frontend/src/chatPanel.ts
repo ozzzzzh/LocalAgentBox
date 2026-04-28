@@ -34,6 +34,7 @@ export class ChatPanel {
   private messages: ChatMessage[] = [];
   private currentFile: string | null = null;
   private sessionId: string | null = null;
+  private sessionKey: string | null = null;
   private isStreaming: boolean = false;
 
   constructor(
@@ -74,6 +75,18 @@ export class ChatPanel {
     });
   }
 
+  /**
+   * 订阅 session 的消息更新
+   */
+  private async subscribeToSession(key: string): Promise<void> {
+    try {
+      await this.client.request("sessions.messages.subscribe", { key });
+      this.logger.info(`已订阅会话: ${key}`);
+    } catch (error) {
+      this.logger.warning("订阅会话失败", error);
+    }
+  }
+
   private async sendMessage(): Promise<void> {
     const text = this.input.value.trim();
     if (!text || this.isStreaming) return;
@@ -104,34 +117,64 @@ export class ChatPanel {
     try {
       this.isStreaming = true;
 
-      // 发送消息到 Gateway
-      const result = await this.client.request("send", {
+      // 使用 sessions.send 发送消息
+      // 需要先有 sessionKey，格式为 "agent:<agentId>:<sessionId>"
+      // 如果没有 sessionKey，先创建或获取一个
+      if (!this.sessionKey) {
+        // 尝试获取或创建 session
+        const sessionsResult = await this.client.request("sessions.list", {}) as {
+          sessions?: Array<{ key: string; agentId?: string }>;
+        };
+
+        // 查找 main agent 的 session
+        if (sessionsResult.sessions && sessionsResult.sessions.length > 0) {
+          const mainSession = sessionsResult.sessions.find(s => s.agentId === "main" || s.key?.includes("main"));
+          if (mainSession) {
+            this.sessionKey = mainSession.key;
+            // 订阅消息
+            await this.subscribeToSession(this.sessionKey);
+          }
+        }
+
+        // 如果没有找到，创建一个新的 session
+        if (!this.sessionKey) {
+          const createResult = await this.client.request("sessions.create", {
+            agentId: "main",
+            message: content,
+          }) as { key?: string };
+
+          if (createResult.key) {
+            this.sessionKey = createResult.key;
+            this.updateSessionInfo();
+            // 订阅消息
+            await this.subscribeToSession(this.sessionKey);
+          }
+        }
+      }
+
+      // 发送消息
+      const result = await this.client.request("sessions.send", {
+        key: this.sessionKey || "agent:main:main",
         message: content,
-        sessionId: this.sessionId,
+        idempotencyKey: this.generateId(),
       });
 
       this.hideTypingIndicator();
 
-      // 处理响应
+      // 处理响应 - sessions.send 返回的是消息处理结果
+      // 响应可能是流式的，通过事件接收，这里处理同步返回的情况
       if (result && typeof result === "object") {
-        const response = result as { sessionId?: string; text?: string; content?: string };
+        const response = result as {
+          key?: string;
+          runId?: string;
+          status?: string;
+        };
 
-        // 保存会话 ID
-        if (response.sessionId) {
-          this.sessionId = response.sessionId;
+        // 更新 sessionKey
+        if (response.key) {
+          this.sessionKey = response.key;
           this.updateSessionInfo();
         }
-
-        // 添加助手消息
-        const assistantContent = response.text || response.content || JSON.stringify(result, null, 2);
-        const assistantMsg: ChatMessage = {
-          id: this.generateId(),
-          role: "assistant",
-          content: assistantContent,
-          timestamp: new Date(),
-        };
-        this.messages.push(assistantMsg);
-        this.renderMessage(assistantMsg);
       }
     } catch (error) {
       this.hideTypingIndicator();
@@ -152,32 +195,39 @@ export class ChatPanel {
   }
 
   private handleEvent(event: string, payload: unknown): void {
-    // 处理流式消息事件
-    if (event === "message" || event === "agent.message") {
-      const data = payload as { text?: string; delta?: string; done?: boolean };
-      if (data.text || data.delta) {
-        this.handleStreamDelta(data.text || data.delta || "", data.done);
+    console.log(`[ChatPanel] Event: ${event}`, JSON.stringify(payload, null, 2));
+    this.logger.debug(`收到事件: ${event}`, payload);
+
+    // 主要使用 agent 事件处理流式回复
+    if (event === "agent") {
+      const data = payload as {
+        stream?: string;
+        data?: { text?: string; delta?: string; phase?: string };
+        sessionKey?: string;
+      };
+
+      // stream: "assistant" 包含 AI 回复的增量
+      if (data.stream === "assistant" && data.data) {
+        const delta = data.data.delta || "";
+        if (delta) {
+          this.handleStreamDelta(delta, false);
+        }
+      }
+
+      // stream: "lifecycle" phase: "end" 表示回复完成
+      if (data.stream === "lifecycle" && data.data?.phase === "end") {
+        this.handleStreamDelta("", true);
       }
     }
 
-    // 处理工具调用事件
-    if (event === "tool.call" || event === "agent.tool_call") {
-      const data = payload as { id: string; name: string; arguments: unknown };
-      this.handleToolCall({ ...data, status: "running" });
-    }
-
-    // 处理工具结果事件
-    if (event === "tool.result" || event === "agent.tool_result") {
-      const data = payload as { id: string; result: unknown; error?: string };
-      this.handleToolResult(data);
-    }
+    // chat 事件只用于确认最终状态，不重复渲染
+    // session.message 的 assistant 消息也不处理，避免重复
 
     // 处理文件修改事件
     if (event === "file.modified" || event === "workspace.file_changed") {
       const data = payload as { path: string };
       if (this.editor && data.path === this.currentFile) {
         this.logger.info(`文件 ${data.path} 已被修改`);
-        // 可以选择重新加载文件
       }
     }
   }
@@ -186,6 +236,7 @@ export class ChatPanel {
   private streamingMessageId: string | null = null;
 
   private handleStreamDelta(delta: string, done?: boolean): void {
+    console.log(`[ChatPanel] handleStreamDelta: delta="${delta.substring(0, 50)}...", done=${done}, bufferLen=${this.streamBuffer.length}`);
     if (!this.streamingMessageId) {
       // 开始新的流式消息
       this.streamingMessageId = this.generateId();
@@ -204,11 +255,19 @@ export class ChatPanel {
     this.streamBuffer += delta;
 
     // 更新消息内容
-    this.updateStreamingMessage(this.streamingMessageId, this.streamBuffer);
-
     if (done) {
+      // 完成时，更新消息内容并移除光标
+      this.updateStreamingMessage(this.streamingMessageId, this.streamBuffer, false);
+      // 更新消息对象
+      const msg = this.messages.find(m => m.id === this.streamingMessageId);
+      if (msg) {
+        msg.content = this.streamBuffer;
+      }
       this.streamingMessageId = null;
       this.streamBuffer = "";
+    } else {
+      // 流式更新，带光标
+      this.updateStreamingMessage(this.streamingMessageId, this.streamBuffer, true);
     }
   }
 
@@ -287,12 +346,12 @@ export class ChatPanel {
       .join("");
   }
 
-  private updateStreamingMessage(id: string, content: string): void {
+  private updateStreamingMessage(id: string, content: string, showCursor: boolean = true): void {
     const msgEl = this.messagesContainer.querySelector(`[data-id="${id}"]`);
     if (msgEl) {
       const textEl = msgEl.querySelector(".message-text");
       if (textEl) {
-        textEl.innerHTML = this.formatContent(content) + '<span class="typing-cursor">▌</span>';
+        textEl.innerHTML = this.formatContent(content) + (showCursor ? '<span class="typing-cursor">▌</span>' : '');
       }
       this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
     }
@@ -320,16 +379,40 @@ export class ChatPanel {
   }
 
   private formatContent(content: string): string {
-    // 简单的 Markdown 渲染
-    let html = this.escapeHtml(content);
+    // 先处理代码块（避免内部内容被其他规则影响）
+    let html = content;
 
-    // 代码块
+    // 代码块 - 先用占位符替换
+    const codeBlocks: string[] = [];
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-      return `<pre><code class="language-${lang}">${code.trim()}</code></pre>`;
+      const index = codeBlocks.length;
+      codeBlocks.push(`<pre class="code-block"><code class="language-${lang}">${this.escapeHtml(code.trim())}</code></pre>`);
+      return `__CODE_BLOCK_${index}__`;
     });
 
-    // 行内代码
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 行内代码 - 用占位符替换
+    const inlineCodes: string[] = [];
+    html = html.replace(/`([^`]+)`/g, (_, code) => {
+      const index = inlineCodes.length;
+      inlineCodes.push(`<code class="inline-code">${this.escapeHtml(code)}</code>`);
+      return `__INLINE_CODE_${index}__`;
+    });
+
+    // 转义 HTML（除了占位符）
+    html = this.escapeHtml(html);
+
+    // 恢复占位符
+    codeBlocks.forEach((block, i) => {
+      html = html.replace(`__CODE_BLOCK_${i}__`, block);
+    });
+    inlineCodes.forEach((code, i) => {
+      html = html.replace(`__INLINE_CODE_${i}__`, code);
+    });
+
+    // 标题 (###, ##, #)
+    html = html.replace(/^### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 class="md-h3">$1</h3>');
+    html = html.replace(/^# (.+)$/gm, '<h2 class="md-h2">$1</h2>');
 
     // 粗体
     html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -337,8 +420,62 @@ export class ChatPanel {
     // 斜体
     html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
-    // 换行
-    html = html.replace(/\n/g, '<br>');
+    // 无序列表
+    html = html.replace(/^- (.+)$/gm, '<li class="md-li">$1</li>');
+
+    // 有序列表
+    html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-li">$1</li>');
+
+    // 将连续的 li 包装成 ul
+    html = html.replace(/(<li class="md-li">.*<\/li>\n?)+/g, (match) => {
+      return `<ul class="md-ul">${match}</ul>`;
+    });
+
+    // 链接
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" class="md-link">$1</a>');
+
+    // 分隔线
+    html = html.replace(/^---$/gm, '<hr class="md-hr">');
+
+    // 段落：将连续的非标签内容包装成 p
+    // 先按换行分割，处理段落
+    const lines = html.split('\n');
+    const processedLines: string[] = [];
+    let inParagraph = false;
+    let paragraphContent = '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const isBlockElement = trimmed.startsWith('<h') ||
+                            trimmed.startsWith('<ul') ||
+                            trimmed.startsWith('<ol') ||
+                            trimmed.startsWith('<pre') ||
+                            trimmed.startsWith('<hr');
+
+      if (isBlockElement || trimmed === '') {
+        if (inParagraph && paragraphContent) {
+          processedLines.push(`<p class="md-p">${paragraphContent}</p>`);
+          paragraphContent = '';
+          inParagraph = false;
+        }
+        if (trimmed !== '') {
+          processedLines.push(trimmed);
+        }
+      } else {
+        if (inParagraph) {
+          paragraphContent += '<br>' + trimmed;
+        } else {
+          paragraphContent = trimmed;
+          inParagraph = true;
+        }
+      }
+    }
+
+    if (inParagraph && paragraphContent) {
+      processedLines.push(`<p class="md-p">${paragraphContent}</p>`);
+    }
+
+    html = processedLines.join('\n');
 
     return html;
   }
@@ -365,14 +502,16 @@ export class ChatPanel {
 
   private updateSessionInfo(): void {
     const sessionInfo = document.getElementById("sessionInfo");
-    if (sessionInfo && this.sessionId) {
-      sessionInfo.textContent = `会话: ${this.sessionId.slice(0, 8)}...`;
+    const key = this.sessionKey || this.sessionId;
+    if (sessionInfo && key) {
+      sessionInfo.textContent = `会话: ${key.slice(0, 12)}...`;
     }
   }
 
   clear(): void {
     this.messages = [];
     this.sessionId = null;
+    this.sessionKey = null;
     this.messagesContainer.innerHTML = `
       <div class="welcome-message">
         <div class="welcome-icon">🤖</div>

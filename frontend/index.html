@@ -21,14 +21,16 @@
       </div>
       <div class="toolbar-right">
         <span id="currentFile" class="current-file"></span>
+        <button id="toggleToolsBtn" class="btn btn-icon" title="工具面板">🔧</button>
+        <button id="toggleLogsBtn" class="btn btn-icon" title="日志面板">📋</button>
         <button id="settingsBtn" class="btn btn-icon" title="设置">⚙️</button>
       </div>
     </header>
 
-    <!-- 主内容区 - IDE 布局 -->
-    <main class="main-content ide-layout">
+    <!-- 主内容区 - 新布局 -->
+    <main class="main-content new-layout">
       <!-- 左侧边栏 - 文件浏览器 -->
-      <aside class="sidebar left-sidebar" id="sidebar">
+      <aside class="sidebar left-sidebar" id="leftSidebar">
         <div class="sidebar-header">
           <span>📁 文件</span>
           <div class="file-actions">
@@ -41,8 +43,11 @@
         </div>
       </aside>
 
-      <!-- 中间内容区 - Chat + Editor -->
-      <section class="center-area">
+      <!-- 左侧拖拽条 -->
+      <div class="resize-handle resize-handle-v" data-resize="left"></div>
+
+      <!-- 中间内容区 - 编辑器 -->
+      <section class="center-area editor-area">
         <!-- 连接面板 -->
         <div id="connectionPanel" class="panel connection-panel">
           <h2>连接到 OpenClaw Gateway</h2>
@@ -70,50 +75,10 @@
           </form>
         </div>
 
-        <!-- IDE 主区域：Chat 上方 + Editor下方 -->
+        <!-- IDE 主区域：编辑器 -->
         <div id="idePanel" class="panel ide-panel hidden">
-          <!-- Chat 对话区 -->
-          <div class="chat-section">
-            <div class="chat-header">
-              <span>💬 AI Assistant</span>
-              <div class="chat-actions">
-                <button id="clearChatBtn" class="btn btn-small" title="清空对话">🗑️</button>
-                <button id="newSessionBtn" class="btn btn-small" title="新会话">➕</button>
-              </div>
-            </div>
-            <div class="chat-messages" id="chatMessages">
-              <div class="welcome-message">
-                <div class="welcome-icon">🤖</div>
-                <div class="welcome-text">
-                  <h3>欢迎使用 AgentBox IDE</h3>
-                  <p>我可以帮你：</p>
-                  <ul>
-                    <li>📝 编写和修改代码</li>
-                    <li>🔍 分析文件内容</li>
-                    <li>🔧 执行工具命令</li>
-                    <li>💡 解答编程问题</li>
-                  </ul>
-                  <p class="hint">输入消息开始对话，或使用 @ 引用当前文件</p>
-                </div>
-              </div>
-            </div>
-            <div class="chat-input-area">
-              <div class="chat-context" id="chatContext">
-                <span class="context-label">当前文件:</span>
-                <span class="context-file" id="contextFile">-</span>
-              </div>
-              <div class="chat-input-wrapper">
-                <textarea id="chatInput" placeholder="输入消息... 使用 @ 引用当前文件，Enter 发送" rows="3"></textarea>
-                <button id="sendChatBtn" class="btn btn-primary" title="发送">📤</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 编辑器区域 -->
-          <div class="editor-section">
-            <div class="editor-tabs" id="editorTabs">
-              <!-- 动态生成标签页 -->
-            </div>
+          <div class="editor-section full-height">
+            <div class="editor-tabs" id="editorTabs"></div>
             <div class="editor-container">
               <div class="line-numbers" id="lineNumbers"></div>
               <textarea id="codeEditor" spellcheck="false"></textarea>
@@ -129,33 +94,77 @@
         </div>
       </section>
 
-      <!-- 右侧边栏 - 工具面板 -->
-      <aside class="sidebar right-sidebar">
-        <div class="sidebar-tabs">
-          <button class="sidebar-tab active" data-tab="tools">🔧 工具</button>
-          <button class="sidebar-tab" data-tab="logs">📋 日志</button>
-        </div>
+      <!-- 右侧拖拽条 -->
+      <div class="resize-handle resize-handle-v" data-resize="right"></div>
 
-        <div class="sidebar-content">
-          <!-- 工具列表 -->
-          <div id="toolsTab" class="tab-content active">
-            <div id="toolsList" class="tools-list">
-              <div class="empty-state">连接后加载工具</div>
+      <!-- 右侧边栏 - Chat -->
+      <aside class="sidebar right-sidebar chat-sidebar" id="rightSidebar">
+        <div class="chat-section full-height">
+          <div class="chat-header">
+            <span>💬 AI Assistant</span>
+            <div class="chat-actions">
+              <button id="clearChatBtn" class="btn btn-small" title="清空对话">🗑️</button>
+              <button id="newSessionBtn" class="btn btn-small" title="新会话">➕</button>
             </div>
           </div>
-
-          <!-- 日志面板 -->
-          <div id="logsTab" class="tab-content">
-            <div class="logs-header">
-              <button id="clearLogsBtn" class="btn btn-small">清空</button>
+          <div class="chat-messages" id="chatMessages">
+            <div class="welcome-message">
+              <div class="welcome-icon">🤖</div>
+              <div class="welcome-text">
+                <h3>欢迎使用 AgentBox IDE</h3>
+                <p>我可以帮你：</p>
+                <ul>
+                  <li>📝 编写和修改代码</li>
+                  <li>🔍 分析文件内容</li>
+                  <li>🔧 执行工具命令</li>
+                  <li>💡 解答编程问题</li>
+                </ul>
+                <p class="hint">输入消息开始对话，或使用 @ 引用当前文件</p>
+              </div>
             </div>
-            <div id="logsContainer" class="logs-container">
-              <!-- 日志条目 -->
+          </div>
+          <div class="chat-input-area">
+            <div class="chat-context" id="chatContext">
+              <span class="context-label">当前文件:</span>
+              <span class="context-file" id="contextFile">-</span>
+            </div>
+            <div class="chat-input-wrapper">
+              <textarea id="chatInput" placeholder="输入消息... 使用 @ 引用当前文件，Enter 发送" rows="3"></textarea>
+              <button id="sendChatBtn" class="btn btn-primary" title="发送">📤</button>
             </div>
           </div>
         </div>
       </aside>
     </main>
+
+    <!-- 底部抽屉 - 工具/日志 -->
+    <div class="drawer" id="drawer">
+      <div class="drawer-handle" id="drawerHandle">
+        <span class="drawer-handle-icon">▲</span>
+      </div>
+      <div class="drawer-content">
+        <div class="drawer-header">
+          <div class="drawer-tabs">
+            <button class="drawer-tab active" data-tab="tools">🔧 工具</button>
+            <button class="drawer-tab" data-tab="logs">📋 日志</button>
+          </div>
+          <button class="drawer-close" id="closeDrawerBtn">✕</button>
+        </div>
+        <div class="drawer-body">
+          <div id="toolsDrawer" class="drawer-panel active">
+            <div id="toolsList" class="tools-list">
+              <div class="empty-state">连接后加载工具</div>
+            </div>
+          </div>
+          <div id="logsDrawer" class="drawer-panel">
+            <div class="logs-header">
+              <button id="clearLogsBtn" class="btn btn-small">清空</button>
+            </div>
+            <div id="logsContainer" class="logs-container"></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- 底部状态栏 -->
     <footer class="status-bar">
