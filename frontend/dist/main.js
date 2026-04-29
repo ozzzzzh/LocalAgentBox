@@ -65,6 +65,13 @@ class App {
                 this.codeEditor.save();
             }
         });
+        // 刷新文件
+        const refreshFileBtn = document.getElementById("refreshFileBtn");
+        refreshFileBtn?.addEventListener("click", async () => {
+            if (this.codeEditor) {
+                await this.codeEditor.refreshCurrentFile();
+            }
+        });
         // 清空日志
         const clearLogsBtn = document.getElementById("clearLogsBtn");
         clearLogsBtn?.addEventListener("click", () => {
@@ -149,15 +156,16 @@ class App {
         }
     }
     /**
-     * 连接成功后：加载工具、节点，初始化 UI 组件
+     * 连接成功后：加载工具、节点、技能，初始化 UI 组件
      */
     async postConnect() {
         if (!this.client)
             return;
-        // 并行获取工具目录和节点列表
+        // 并行获取工具目录、节点列表和技能状态
         await Promise.all([
             this.client.fetchToolsCatalog(),
             this.client.fetchNodes(),
+            this.client.fetchSkills(),
         ]);
         this.initComponents();
     }
@@ -212,10 +220,13 @@ class App {
             this.toolsPanel = new ToolsPanel(toolsList, this.client);
             this.toolsPanel.render();
         }
-        // 更新工具计数
+        // 更新工具和技能计数
         const toolCount = document.getElementById("toolCount");
         if (toolCount && this.client) {
-            toolCount.textContent = `工具: ${this.client.getTools().length}`;
+            const tools = this.client.getTools().length;
+            const skills = this.client.getSkills().filter((s) => s.eligible).length;
+            const totalSkills = this.client.getSkills().length;
+            toolCount.textContent = `工具: ${tools} | Skills: ${skills}/${totalSkills}`;
         }
     }
     /**

@@ -2,6 +2,7 @@
  * Chat Panel 组件 - AI 对话界面
  */
 import { Logger } from "./logger.js";
+import { DiffPanel } from "./diffPanel.js";
 export class ChatPanel {
     constructor(container, messagesContainer, input, sendBtn, client) {
         this.editor = null;
@@ -10,6 +11,8 @@ export class ChatPanel {
         this.sessionId = null;
         this.sessionKey = null;
         this.isStreaming = false;
+        this.thinkingIndicator = null;
+        this.pendingFileModifications = new Set();
         this.streamBuffer = "";
         this.streamingMessageId = null;
         this.container = container;
@@ -18,6 +21,7 @@ export class ChatPanel {
         this.sendBtn = sendBtn;
         this.client = client;
         this.logger = Logger.getInstance();
+        this.diffPanel = new DiffPanel();
         this.init();
     }
     setEditor(editor) {
@@ -76,51 +80,39 @@ export class ChatPanel {
         try {
             this.isStreaming = true;
             // 使用 sessions.send 发送消息
-            // 需要先有 sessionKey，格式为 "agent:<agentId>:<sessionId>"
-            // 如果没有 sessionKey，先创建或获取一个
-            if (!this.sessionKey) {
-                // 尝试获取或创建 session
-                const sessionsResult = await this.client.request("sessions.list", {});
-                // 查找 main agent 的 session
-                if (sessionsResult.sessions && sessionsResult.sessions.length > 0) {
-                    const mainSession = sessionsResult.sessions.find(s => s.agentId === "main" || s.key?.includes("main"));
-                    if (mainSession) {
-                        this.sessionKey = mainSession.key;
-                        // 订阅消息
-                        await this.subscribeToSession(this.sessionKey);
-                    }
-                }
-                // 如果没有找到，创建一个新的 session
-                if (!this.sessionKey) {
-                    const createResult = await this.client.request("sessions.create", {
-                        agentId: "main",
-                        message: content,
-                    });
-                    if (createResult.key) {
-                        this.sessionKey = createResult.key;
-                        this.updateSessionInfo();
-                        // 订阅消息
-                        await this.subscribeToSession(this.sessionKey);
-                    }
-                }
-            }
-            // 发送消息
-            const result = await this.client.request("sessions.send", {
-                key: this.sessionKey || "agent:main:main",
-                message: content,
-                idempotencyKey: this.generateId(),
-            });
-            this.hideTypingIndicator();
-            // 处理响应 - sessions.send 返回的是消息处理结果
-            // 响应可能是流式的，通过事件接收，这里处理同步返回的情况
-            if (result && typeof result === "object") {
-                const response = result;
-                // 更新 sessionKey
-                if (response.key) {
-                    this.sessionKey = response.key;
+            // 确保 sessionKey 不是 heartbeat session
+            if (!this.sessionKey || this.sessionKey.endsWith(":node")) {
+                // 创建一个新的 session（不使用已存在的，避免选中 heartbeat session）
+                const createResult = await this.client.request("sessions.create", {
+                    agentId: "main",
+                    message: content,
+                });
+                if (createResult.key) {
+                    this.sessionKey = createResult.key;
                     this.updateSessionInfo();
+                    // 订阅消息
+                    await this.subscribeToSession(this.sessionKey);
+                    console.log(`[ChatPanel] Created new session: ${this.sessionKey}`);
                 }
             }
+            else {
+                // 使用已有的 session（但要确保不是 heartbeat）
+                const result = await this.client.request("sessions.send", {
+                    key: this.sessionKey,
+                    message: content,
+                    idempotencyKey: this.generateId(),
+                });
+                // 处理响应
+                if (result && typeof result === "object") {
+                    const response = result;
+                    // 更新 sessionKey
+                    if (response.key) {
+                        this.sessionKey = response.key;
+                        this.updateSessionInfo();
+                    }
+                }
+            }
+            this.hideTypingIndicator();
         }
         catch (error) {
             this.hideTypingIndicator();
@@ -142,28 +134,257 @@ export class ChatPanel {
     handleEvent(event, payload) {
         console.log(`[ChatPanel] Event: ${event}`, JSON.stringify(payload, null, 2));
         this.logger.debug(`收到事件: ${event}`, payload);
+        // 过滤掉不需要处理的事件
+        if (this.shouldIgnoreEvent(event, payload)) {
+            console.log(`[ChatPanel] Ignored event: ${event}`);
+            return;
+        }
         // 主要使用 agent 事件处理流式回复
         if (event === "agent") {
             const data = payload;
+            // lifecycle start - 显示思考状态
+            if (data.stream === "lifecycle" && data.data?.phase === "start") {
+                this.showThinkingIndicator("thinking");
+            }
             // stream: "assistant" 包含 AI 回复的增量
             if (data.stream === "assistant" && data.data) {
+                this.hideThinkingIndicator();
                 const delta = data.data.delta || "";
                 if (delta) {
                     this.handleStreamDelta(delta, false);
                 }
             }
+            // stream: "tool" 包含工具调用信息
+            if (data.stream === "tool" && data.data) {
+                this.showThinkingIndicator("tool");
+                this.handleToolEvent(data.data);
+            }
             // stream: "lifecycle" phase: "end" 表示回复完成
             if (data.stream === "lifecycle" && data.data?.phase === "end") {
+                this.hideThinkingIndicator();
                 this.handleStreamDelta("", true);
+                // 回复结束后检查文件修改并刷新当前文件
+                setTimeout(() => {
+                    this.checkFileModifications();
+                    this.refreshCurrentFile();
+                }, 500);
             }
         }
-        // chat 事件只用于确认最终状态，不重复渲染
-        // session.message 的 assistant 消息也不处理，避免重复
-        // 处理文件修改事件
-        if (event === "file.modified" || event === "workspace.file_changed") {
-            const data = payload;
-            if (this.editor && data.path === this.currentFile) {
-                this.logger.info(`文件 ${data.path} 已被修改`);
+        // session.tool 事件也处理
+        if (event === "session.tool") {
+            this.handleToolEvent(payload);
+        }
+        // 处理 session.message 中的 toolCall
+        if (event === "session.message") {
+            this.handleSessionMessage(payload);
+        }
+    }
+    /**
+     * 处理 session.message 事件
+     */
+    handleSessionMessage(payload) {
+        const msgData = payload;
+        // 忽略 heartbeat session 的消息
+        if (msgData.sessionKey?.endsWith(":node")) {
+            return;
+        }
+        if (!msgData.message || msgData.message.role !== "assistant")
+            return;
+        const content = msgData.message.content;
+        if (!content || !Array.isArray(content))
+            return;
+        // 处理每个内容项
+        for (const item of content) {
+            // 处理文本内容
+            if (item.type === "text" && item.text && item.text.trim()) {
+                // 如果是 NO_REPLY，跳过
+                if (item.text.trim() === "NO_REPLY")
+                    continue;
+                // 直接渲染完整消息（不使用流式）
+                if (!this.streamingMessageId) {
+                    const msg = {
+                        id: this.generateId(),
+                        role: "assistant",
+                        content: item.text,
+                        timestamp: new Date(),
+                    };
+                    this.messages.push(msg);
+                    this.renderMessage(msg);
+                }
+            }
+            // 处理工具调用
+            if (item.type === "toolCall" && item.name) {
+                console.log(`[ChatPanel] Tool call from session.message: ${item.name}`, item.arguments);
+                this.handleToolEvent({
+                    name: item.name,
+                    toolCallId: item.id,
+                    args: item.arguments,
+                });
+            }
+        }
+        // 如果 stopReason 是 stop，表示回复完成，刷新文件
+        if (msgData.message.stopReason === "stop") {
+            // 延迟刷新，确保工具执行完成
+            setTimeout(() => {
+                this.checkFileModifications();
+                this.refreshCurrentFile();
+            }, 1000);
+        }
+    }
+    /**
+     * 判断是否应该忽略该事件
+     */
+    shouldIgnoreEvent(event, payload) {
+        // 只过滤心跳事件本身
+        if (event === "heartbeat") {
+            return true;
+        }
+        // 过滤 sessionKey 是 heartbeat session 的消息
+        const data = payload;
+        if (data.sessionKey && data.sessionKey.endsWith(":node")) {
+            return true;
+        }
+        return false;
+    }
+    showThinkingIndicator(stream) {
+        if (this.thinkingIndicator)
+            return;
+        // 移除欢迎消息
+        const welcome = this.messagesContainer.querySelector(".welcome-message");
+        if (welcome)
+            welcome.remove();
+        const indicator = document.createElement("div");
+        indicator.className = "message assistant thinking-message";
+        indicator.id = "thinkingIndicator";
+        let statusText = "正在思考中...";
+        if (stream === "tool") {
+            statusText = "正在执行工具...";
+        }
+        indicator.innerHTML = `
+      <div class="message-avatar">🤖</div>
+      <div class="message-content">
+        <div class="thinking-status">
+          <span class="thinking-spinner"></span>
+          <span class="thinking-text">${statusText}</span>
+        </div>
+      </div>
+    `;
+        this.messagesContainer.appendChild(indicator);
+        this.thinkingIndicator = indicator;
+        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    }
+    hideThinkingIndicator() {
+        if (this.thinkingIndicator) {
+            this.thinkingIndicator.remove();
+            this.thinkingIndicator = null;
+        }
+    }
+    /**
+     * 刷新当前打开的文件
+     */
+    async refreshCurrentFile() {
+        if (!this.editor)
+            return;
+        const currentFile = this.editor.getCurrentFile();
+        if (!currentFile)
+            return;
+        this.logger.info(`自动刷新当前文件: ${currentFile}`);
+        await this.editor.refreshCurrentFile();
+    }
+    /**
+     * 处理工具调用事件
+     */
+    handleToolEvent(data) {
+        console.log(`[ChatPanel] Tool event raw data:`, data);
+        // 工具事件结构: { phase, name, toolCallId, args }
+        const toolData = data;
+        // name 或 toolName
+        let toolName = toolData.name || toolData.toolName;
+        let args = toolData.args || toolData.arguments || toolData.params;
+        // 如果 args 是字符串，尝试解析
+        if (typeof args === "string") {
+            try {
+                args = JSON.parse(args);
+            }
+            catch {
+                // ignore
+            }
+        }
+        console.log(`[ChatPanel] Parsed tool: ${toolName}, phase: ${toolData.phase}, args:`, args);
+        // 只在工具开始或更新时检测文件写入
+        if (toolData.phase === "start" || toolData.phase === "update" || !toolData.phase) {
+            // 检测文件写入工具
+            if (toolName && this.isFileWriteTool(toolName)) {
+                const fileArgs = args;
+                const filePath = (fileArgs?.path || fileArgs?.filePath || fileArgs?.file_path);
+                console.log(`[ChatPanel] File write detected: ${filePath}`);
+                if (filePath) {
+                    this.logger.info(`检测到文件写入: ${filePath}`);
+                    this.pendingFileModifications.add(filePath);
+                }
+            }
+        }
+    }
+    /**
+     * 判断是否是文件写入工具
+     */
+    isFileWriteTool(toolName) {
+        const lowerName = toolName.toLowerCase();
+        // 检查关键词
+        const keywords = ["write", "edit", "create", "save", "modify", "update"];
+        // 检查文件相关
+        const fileKeywords = ["file", "fs"];
+        const hasActionKeyword = keywords.some((k) => lowerName.includes(k));
+        const hasFileKeyword = fileKeywords.some((k) => lowerName.includes(k));
+        return hasActionKeyword && hasFileKeyword;
+    }
+    /**
+     * 检查并处理文件修改
+     */
+    async checkFileModifications() {
+        console.log(`[ChatPanel] checkFileModifications: pending files =`, [...this.pendingFileModifications]);
+        if (!this.editor || this.pendingFileModifications.size === 0) {
+            console.log(`[ChatPanel] checkFileModifications: no pending files or no editor`);
+            return;
+        }
+        const filesToCheck = [...this.pendingFileModifications];
+        this.pendingFileModifications.clear();
+        for (const filePath of filesToCheck) {
+            console.log(`[ChatPanel] Processing file: ${filePath}`);
+            // 如果文件已打开，刷新并显示 diff
+            if (this.editor.isOpen(filePath)) {
+                console.log(`[ChatPanel] File is open, refreshing...`);
+                const result = await this.editor.refreshFile(filePath);
+                console.log(`[ChatPanel] Refresh result:`, result ? { oldLen: result.oldContent.length, newLen: result.newContent.length, changed: result.oldContent !== result.newContent } : null);
+                if (result && result.oldContent !== result.newContent) {
+                    console.log(`[ChatPanel] Content changed, showing diff...`);
+                    // 显示 diff 面板
+                    this.diffPanel.show(filePath, result.oldContent, result.newContent);
+                    // 在聊天中添加提示消息
+                    const diffMsg = {
+                        id: this.generateId(),
+                        role: "assistant",
+                        content: `📝 文件 \`${filePath.split("/").pop()}\` 已被修改`,
+                        timestamp: new Date(),
+                    };
+                    this.messages.push(diffMsg);
+                    this.renderMessage(diffMsg);
+                }
+                else {
+                    console.log(`[ChatPanel] No content change detected`);
+                }
+            }
+            else {
+                console.log(`[ChatPanel] File not open, showing info message`);
+                // 文件未打开，只显示提示
+                const infoMsg = {
+                    id: this.generateId(),
+                    role: "assistant",
+                    content: `📝 文件 \`${filePath.split("/").pop()}\` 已被创建/修改`,
+                    timestamp: new Date(),
+                };
+                this.messages.push(infoMsg);
+                this.renderMessage(infoMsg);
             }
         }
     }

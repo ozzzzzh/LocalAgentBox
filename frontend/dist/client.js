@@ -15,6 +15,7 @@ export class AgentClient {
         this.reconnectDelay = 3000;
         this.reconnectTimer = null;
         this.tools = [];
+        this.skills = [];
         this.nodes = [];
         this.connected = false;
         this._sessionId = 0;
@@ -219,6 +220,27 @@ export class AgentClient {
      */
     getNodes() {
         return this.nodes;
+    }
+    /**
+     * 获取技能列表（缓存）
+     */
+    getSkills() {
+        return this.skills;
+    }
+    /**
+     * 获取技能状态
+     */
+    async fetchSkills() {
+        try {
+            const result = (await this.request("skills.status", {}));
+            if (result && Array.isArray(result.skills)) {
+                this.skills = result.skills;
+            }
+            this.logger.info(`已加载 ${this.skills.length} 个技能`);
+        }
+        catch (error) {
+            this.logger.warning("获取技能列表失败", error);
+        }
     }
     /**
      * 是否已连接

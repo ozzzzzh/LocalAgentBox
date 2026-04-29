@@ -315,6 +315,73 @@ export class CodeEditor {
     this.markModified();
   }
 
+  /**
+   * 刷新当前文件内容（从磁盘重新读取）
+   */
+  async refreshCurrentFile(): Promise<string | null> {
+    if (!this.currentFile) return null;
+
+    const result = await this.runCommand(`cat "${this.currentFile}"`);
+    if (!result.success) {
+      this.logger.error(`刷新失败: ${result.error}`);
+      return null;
+    }
+
+    const newContent = result.output || "";
+    const oldContent = this.container.value;
+
+    // 更新文件内容
+    const file = this.openFiles.get(this.currentFile);
+    if (file) {
+      file.content = newContent;
+      file.modified = false;
+    }
+
+    // 更新编辑器显示
+    this.container.value = newContent;
+    this.updateLineNumbers();
+    this.updateFileInfo();
+    this.renderTabs();
+
+    // 返回旧内容用于diff比较
+    return oldContent !== newContent ? oldContent : null;
+  }
+
+  /**
+   * 检查文件是否已打开
+   */
+  isOpen(path: string): boolean {
+    return this.openFiles.has(path);
+  }
+
+  /**
+   * 刷新指定文件（如果已打开）
+   */
+  async refreshFile(path: string): Promise<{ oldContent: string; newContent: string } | null> {
+    if (!this.openFiles.has(path)) return null;
+
+    const result = await this.runCommand(`cat "${path}"`);
+    if (!result.success) return null;
+
+    const file = this.openFiles.get(path)!;
+    const oldContent = file.content;
+    const newContent = result.output || "";
+
+    file.content = newContent;
+    file.modified = false;
+
+    // 如果是当前文件，更新显示
+    if (this.currentFile === path) {
+      this.container.value = newContent;
+      this.updateLineNumbers();
+      this.updateFileInfo();
+    }
+
+    this.renderTabs();
+
+    return { oldContent, newContent };
+  }
+
   private switchToFile(path: string): void {
     const file = this.openFiles.get(path);
     if (!file) return;

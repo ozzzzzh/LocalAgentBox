@@ -8,8 +8,10 @@
 </head>
 <body>
   <div id="app">
-    <!-- 顶部工具栏 -->
-    <header class="toolbar">
+    <!-- 主内容区（包含工具栏、编辑区、抽屉） -->
+    <div class="app-main">
+      <!-- 顶部工具栏 -->
+      <header class="toolbar">
       <div class="toolbar-left">
         <h1 class="logo">🤖 AgentBox IDE</h1>
       </div>
@@ -87,6 +89,7 @@
               <span id="cursorPosition">行 1, 列 1</span>
               <span id="fileInfo"></span>
               <div class="editor-actions">
+                <button id="refreshFileBtn" class="btn btn-small" title="刷新文件">🔄</button>
                 <button id="saveFileBtn" class="btn btn-small">💾 保存</button>
               </div>
             </div>
@@ -165,6 +168,7 @@
         </div>
       </div>
     </div>
+    </div><!-- 关闭 app-main -->
 
     <!-- 底部状态栏 -->
     <footer class="status-bar">

@@ -12,6 +12,7 @@ import {
   ToolDefinition,
   ConnectionOptions,
   NodeInfo,
+  SkillInfo,
 } from "./types.js";
 import { Logger } from "./logger.js";
 
@@ -32,6 +33,7 @@ export class AgentClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private logger: Logger;
   private tools: ToolDefinition[] = [];
+  private skills: SkillInfo[] = [];
   private nodes: NodeInfo[] = [];
   private connected = false;
   private _sessionId = 0;
@@ -266,6 +268,30 @@ export class AgentClient {
    */
   getNodes(): NodeInfo[] {
     return this.nodes;
+  }
+
+  /**
+   * 获取技能列表（缓存）
+   */
+  getSkills(): SkillInfo[] {
+    return this.skills;
+  }
+
+  /**
+   * 获取技能状态
+   */
+  async fetchSkills(): Promise<void> {
+    try {
+      const result = (await this.request("skills.status", {})) as {
+        skills?: SkillInfo[];
+      };
+      if (result && Array.isArray(result.skills)) {
+        this.skills = result.skills;
+      }
+      this.logger.info(`已加载 ${this.skills.length} 个技能`);
+    } catch (error) {
+      this.logger.warning("获取技能列表失败", error);
+    }
   }
 
   /**

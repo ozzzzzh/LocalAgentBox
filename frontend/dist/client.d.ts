@@ -2,7 +2,7 @@
  * OpenClaw Gateway WebSocket 客户端
  * 适配 OpenClaw 帧协议 (req/res/event)
  */
-import { ToolDefinition, ConnectionOptions, NodeInfo } from "./types.js";
+import { ToolDefinition, ConnectionOptions, NodeInfo, SkillInfo } from "./types.js";
 type ConnectionHandler = (connected: boolean) => void;
 type EventHandler = (event: string, payload: unknown) => void;
 export declare class AgentClient {
@@ -18,6 +18,7 @@ export declare class AgentClient {
     private reconnectTimer;
     private logger;
     private tools;
+    private skills;
     private nodes;
     private connected;
     private _sessionId;
@@ -65,6 +66,14 @@ export declare class AgentClient {
      * 获取节点列表（缓存）
      */
     getNodes(): NodeInfo[];
+    /**
+     * 获取技能列表（缓存）
+     */
+    getSkills(): SkillInfo[];
+    /**
+     * 获取技能状态
+     */
+    fetchSkills(): Promise<void>;
     /**
      * 是否已连接
      */

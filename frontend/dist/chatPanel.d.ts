@@ -16,6 +16,7 @@ export declare class ChatPanel {
     private sessionId;
     private sessionKey;
     private isStreaming;
+    private diffPanel;
     constructor(container: HTMLElement, messagesContainer: HTMLElement, input: HTMLTextAreaElement, sendBtn: HTMLButtonElement, client: AgentClient);
     setEditor(editor: CodeEditor): void;
     private init;
@@ -25,6 +26,34 @@ export declare class ChatPanel {
     private subscribeToSession;
     private sendMessage;
     private handleEvent;
+    /**
+     * 处理 session.message 事件
+     */
+    private handleSessionMessage;
+    /**
+     * 判断是否应该忽略该事件
+     */
+    private shouldIgnoreEvent;
+    private thinkingIndicator;
+    private showThinkingIndicator;
+    private hideThinkingIndicator;
+    /**
+     * 刷新当前打开的文件
+     */
+    private refreshCurrentFile;
+    /**
+     * 处理工具调用事件
+     */
+    private handleToolEvent;
+    /**
+     * 判断是否是文件写入工具
+     */
+    private isFileWriteTool;
+    private pendingFileModifications;
+    /**
+     * 检查并处理文件修改
+     */
+    private checkFileModifications;
     private streamBuffer;
     private streamingMessageId;
     private handleStreamDelta;

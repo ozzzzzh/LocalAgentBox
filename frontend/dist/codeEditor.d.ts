@@ -33,6 +33,21 @@ export declare class CodeEditor {
     getCurrentFile(): string | null;
     getCurrentContent(): string | null;
     setContent(content: string): void;
+    /**
+     * 刷新当前文件内容（从磁盘重新读取）
+     */
+    refreshCurrentFile(): Promise<string | null>;
+    /**
+     * 检查文件是否已打开
+     */
+    isOpen(path: string): boolean;
+    /**
+     * 刷新指定文件（如果已打开）
+     */
+    refreshFile(path: string): Promise<{
+        oldContent: string;
+        newContent: string;
+    } | null>;
     private switchToFile;
     private renderTabs;
     private updateLineNumbers;

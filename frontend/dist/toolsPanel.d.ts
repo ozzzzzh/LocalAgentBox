@@ -10,6 +10,11 @@ export declare class ToolsPanel {
     constructor(container: HTMLElement, client: AgentClient);
     private findNode;
     render(): void;
+    private renderSkillsSection;
+    private renderSkillItem;
+    private renderToolsSection;
+    private bindEvents;
+    private toggleSkillDetail;
     private groupTools;
     private getCategory;
     private getToolIcon;

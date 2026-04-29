@@ -3,7 +3,7 @@
  */
 
 import { AgentClient } from "./client.js";
-import { ToolDefinition } from "./types.js";
+import { ToolDefinition, SkillInfo } from "./types.js";
 import { Logger } from "./logger.js";
 
 export class ToolsPanel {
@@ -31,12 +31,76 @@ export class ToolsPanel {
 
   render(): void {
     const tools = this.client.getTools();
+    const skills = this.client.getSkills();
 
-    if (tools.length === 0) {
-      this.container.innerHTML = '<div class="empty-state">无可用工具</div>';
+    if (tools.length === 0 && skills.length === 0) {
+      this.container.innerHTML = '<div class="empty-state">无可用工具和技能</div>';
       return;
     }
 
+    // 渲染技能和工具
+    let html = "";
+
+    if (skills.length > 0) {
+      html += this.renderSkillsSection(skills);
+    }
+
+    if (tools.length > 0) {
+      html += this.renderToolsSection(tools);
+    }
+
+    this.container.innerHTML = html;
+
+    // 绑定点击事件
+    this.bindEvents();
+  }
+
+  private renderSkillsSection(skills: SkillInfo[]): string {
+    // 按来源分组
+    const bundled = skills.filter((s) => s.bundled);
+    const workspace = skills.filter((s) => !s.bundled);
+    const eligible = skills.filter((s) => s.eligible);
+    const blocked = skills.filter((s) => s.blockedByAllowlist);
+
+    return `
+      <div class="skills-section">
+        <div class="section-header">
+          <span>🎯 Skills (${eligible.length}/${skills.length} 可用)</span>
+        </div>
+        <div class="skills-summary">
+          <span class="skill-badge bundled">内置: ${bundled.length}</span>
+          <span class="skill-badge workspace">工作区: ${workspace.length}</span>
+          ${blocked.length > 0 ? `<span class="skill-badge blocked">受限: ${blocked.length}</span>` : ""}
+        </div>
+        <div class="skills-list">
+          ${skills.map((skill) => this.renderSkillItem(skill)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  private renderSkillItem(skill: SkillInfo): string {
+    const statusClass = skill.eligible ? "eligible" : skill.blockedByAllowlist ? "blocked" : "missing";
+    const statusIcon = skill.eligible ? "✅" : skill.blockedByAllowlist ? "🚫" : "⚠️";
+    const emoji = skill.emoji || "📦";
+
+    return `
+      <div class="skill-item ${statusClass}" data-skill="${skill.skillKey}">
+        <span class="skill-emoji">${emoji}</span>
+        <div class="skill-info">
+          <div class="skill-name">${skill.name}</div>
+          <div class="skill-desc">${skill.description}</div>
+          <div class="skill-meta">
+            <span class="skill-source">${skill.bundled ? "内置" : skill.source}</span>
+            ${skill.missing.length > 0 ? `<span class="skill-missing">缺少: ${skill.missing.join(", ")}</span>` : ""}
+          </div>
+        </div>
+        <span class="skill-status">${statusIcon}</span>
+      </div>
+    `;
+  }
+
+  private renderToolsSection(tools: ToolDefinition[]): string {
     // 按类别分组
     const grouped = this.groupTools(tools);
 
@@ -65,9 +129,11 @@ export class ToolsPanel {
       })
       .join("");
 
-    this.container.innerHTML = html;
+    return `<div class="tools-section">${html}</div>`;
+  }
 
-    // 绑定点击事件
+  private bindEvents(): void {
+    // 工具点击事件
     this.container.querySelectorAll(".tool-item").forEach((el) => {
       el.addEventListener("click", () => {
         const toolName = el.getAttribute("data-tool");
@@ -76,6 +142,46 @@ export class ToolsPanel {
         }
       });
     });
+
+    // 技能点击事件（可展开详情）
+    this.container.querySelectorAll(".skill-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        const skillKey = el.getAttribute("data-skill");
+        if (skillKey) {
+          this.toggleSkillDetail(el as HTMLElement, skillKey);
+        }
+      });
+    });
+  }
+
+  private toggleSkillDetail(el: HTMLElement, skillKey: string): void {
+    // 切换展开状态
+    const isExpanded = el.classList.contains("expanded");
+
+    // 关闭其他展开的技能
+    this.container.querySelectorAll(".skill-item.expanded").forEach((item) => {
+      item.classList.remove("expanded");
+      const detail = item.querySelector(".skill-detail");
+      if (detail) detail.remove();
+    });
+
+    if (!isExpanded) {
+      el.classList.add("expanded");
+      const skills = this.client.getSkills();
+      const skill = skills.find((s) => s.skillKey === skillKey);
+      if (skill) {
+        const detailHtml = `
+          <div class="skill-detail">
+            <div class="detail-row"><span>来源:</span><span>${skill.source}</span></div>
+            <div class="detail-row"><span>路径:</span><span>${skill.filePath}</span></div>
+            ${skill.primaryEnv ? `<div class="detail-row"><span>环境变量:</span><span>${skill.primaryEnv}</span></div>` : ""}
+            ${skill.homepage ? `<div class="detail-row"><span>主页:</span><a href="${skill.homepage}" target="_blank">${skill.homepage}</a></div>` : ""}
+            ${skill.requirements.length > 0 ? `<div class="detail-row"><span>要求:</span><span>${skill.requirements.join(", ")}</span></div>` : ""}
+          </div>
+        `;
+        el.insertAdjacentHTML("beforeend", detailHtml);
+      }
+    }
   }
 
   private groupTools(tools: ToolDefinition[]): Record<string, ToolDefinition[]> {
@@ -227,7 +333,7 @@ export class ToolsPanel {
 
         return `
           <div class="form-group">
-            <label>${name} ${isRequired ? '<span style="color: var(--error-color)">*</span>' : ''}</label>
+            <label>${name} ${isRequired ? '<span style="color: var(--error-color)">*</span>' : ""}</label>
             <input type="${inputType}" name="${name}"
                    placeholder="${schemaObj.description || ""}"
                    ${isRequired ? "required" : ""}>

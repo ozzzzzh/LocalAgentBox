@@ -1,5 +1,174 @@
 # AgentBox IDE 开发日志
 
+## 2026-04-29 开发内容总结
+
+### 一、完成的功能
+
+#### 1. Skills 技能识别
+- 新增 `SkillInfo` 类型定义
+- 实现 `fetchSkills()` 方法调用 `skills.status` API
+- 工具面板显示技能列表，区分内置/工作区/受限状态
+- 状态栏显示 `工具: X | Skills: 可用/总数`
+
+#### 2. 布局改进 - 抽屉推动内容
+- 底部抽屉改为 flex 布局的一部分（不再是 fixed 定位）
+- 抽屉弹出时上方内容自动上移，不再遮挡
+- 新增 `.app-main` 容器管理布局
+
+#### 3. 文件实时更新
+- 编辑器新增刷新按钮 🔄
+- AI 回复结束后自动刷新当前打开的文件
+- 新增 `refreshCurrentFile()` 和 `refreshFile()` 方法
+
+#### 4. Diff 展示面板
+- 新增 `diffPanel.ts` 组件
+- 使用 LCS 算法计算行级差异
+- 显示新增/删除行统计（+X/-Y）
+- 绿色表示新增，红色表示删除
+
+#### 5. 思考状态指示
+- 显示"正在思考中..."带旋转动画
+- 执行工具时显示"正在执行工具..."
+- 收到实际内容后自动隐藏
+
+#### 6. Heartbeat 问题修复
+- 修复 sendMessage 选中错误 session（heartbeat session）的问题
+- 过滤 heartbeat 事件和 sessionKey 以 `:node` 结尾的消息
+- 从 session.message 中正确提取工具调用信息
+
+---
+
+### 二、踩坑记录与解决方案
+
+#### 问题 1: 抽屉遮挡内容
+
+**现象:** 底部抽屉弹出时覆盖 Chat 和编辑器区域
+
+**原因:** 抽屉使用 `position: fixed` 定位
+
+**解决方案:** 改为 flex 布局，抽屉作为 flex 子元素
+```css
+.app-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.drawer {
+  height: 0; /* 关闭 */
+}
+.drawer.open {
+  height: auto; /* 打开 */
+}
+```
+
+#### 问题 2: Heartbeat 消息反复出现
+
+**现象:** AI 一直发送 NO、NO_REPLY 消息，HEARTBEAT_OK 不断出现
+
+**原因:** `sendMessage` 从 `sessions.list` 中选中了 heartbeat session（`agent:main:node`），导致所有消息发送到这个 session
+
+**解决方案:** 不再查找已有 session，直接创建新 session
+```typescript
+if (!this.sessionKey || this.sessionKey.endsWith(":node")) {
+  // 创建新 session，避免选中 heartbeat session
+  const createResult = await this.client.request("sessions.create", {
+    agentId: "main",
+    message: content,
+  });
+  this.sessionKey = createResult.key;
+}
+```
+
+#### 问题 3: 工具调用未捕获
+
+**现象:** 没有看到 `[ChatPanel] Tool event raw data` 日志
+
+**原因:** 工具调用信息在 `session.message` 的 `content` 数组中，格式为 `{ type: "toolCall", name, arguments }`
+
+**解决方案:** 解析 session.message 中的 toolCall
+```typescript
+if (item.type === "toolCall" && item.name) {
+  this.handleToolEvent({
+    name: item.name,
+    toolCallId: item.id,
+    args: item.arguments,
+  });
+}
+```
+
+#### 问题 4: 过滤逻辑误杀正常消息
+
+**现象:** 过滤后 AI 回复也不显示了
+
+**原因:** 过滤条件过于严格，如 `systemSent === true` 过滤了正常消息
+
+**解决方案:** 只过滤 heartbeat 相关的消息
+```typescript
+// 只过滤 sessionKey 以 :node 结尾的（heartbeat session）
+if (data.sessionKey?.endsWith(":node")) {
+  return true;
+}
+```
+
+---
+
+### 三、OpenClaw 协议要点
+
+#### 1. Skills API
+| 方法 | 用途 |
+|------|------|
+| `skills.status` | 获取技能状态列表 |
+| `skills.search` | 搜索技能 |
+| `skills.detail` | 获取技能详情 |
+
+#### 2. Session Key 格式
+- 正常对话: `agent:main:xxx`
+- Heartbeat: `agent:main:node`（以 `:node` 结尾）
+
+#### 3. 工具调用格式（session.message）
+```json
+{
+  "type": "toolCall",
+  "id": "call_xxx",
+  "name": "write_file",
+  "arguments": { "path": "/path/to/file", "content": "..." }
+}
+```
+
+#### 4. 事件过滤
+- `event === "heartbeat"` - 心跳事件
+- `sessionKey.endsWith(":node")` - heartbeat session 的消息
+
+---
+
+### 四、新增/修改文件
+
+#### 新增文件
+- `frontend/src/diffPanel.ts` - Diff 展示组件
+
+#### 修改文件
+- `frontend/src/types.ts` - 新增 SkillInfo 类型
+- `frontend/src/client.ts` - 新增 fetchSkills 方法
+- `frontend/src/toolsPanel.ts` - 显示技能列表
+- `frontend/src/chatPanel.ts` - 修复 heartbeat、工具调用、思考状态
+- `frontend/src/codeEditor.ts` - 新增文件刷新方法
+- `frontend/src/main.ts` - 调用 fetchSkills、刷新按钮事件
+- `frontend/src/layoutManager.ts` - 抽屉布局调整
+- `frontend/index.html` - 新增刷新按钮、布局结构调整
+- `frontend/css/style.css` - 抽屉 flex 布局、diff 样式、思考状态样式
+
+---
+
+### 五、待完成功能
+
+1. Diff 面板实际显示（工具调用检测待完善）
+2. 代码补全 (completion)
+3. 文件搜索
+4. 多标签编辑器优化
+5. Git 状态显示
+
+---
+
 ## 2026-04-28 开发内容总结
 
 ### 一、完成的功能
